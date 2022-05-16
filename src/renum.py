@@ -121,6 +121,7 @@ class Renum:
         # True if permanent effects will be needed (for test day or repeatability model), False otherwise
         self.has_perm = False
         self.ped = ped
+        self.new_ped = None
         self.genomic_data = genomic_data
         self.ag_variance = ag_variance
         self.pe_variance = pe_variance
@@ -178,7 +179,7 @@ class Renum:
                 f.writelines(self.file_lines)
             os.system('renumf90 genrenf90.par')
             self.dummy_lines.extend(['SNP_FILE\n', 'dummy_snps.txt\n', 'OPTION saveAscii\n', 'OPTION saveAinv\n',
-                                     'OPTION saveA22\n'])
+                                     'OPTION saveA22\n', 'OPTION no_quality_control\n'])
             self.__add_dummpy_snps__()
             with open('genrenf90.par', 'w') as f:
                 f.writelines(self.dummy_lines)
@@ -197,6 +198,9 @@ class Renum:
             with open('genrenf90.par', 'w') as f:
                 f.writelines(self.file_lines)
             os.system('renumf90 genrenf90.par')
+
+            self.new_ped = self.ped.copy()
+            self.new_ped.iloc[:, 0] = self.ped.iloc[:, 0].map(self.animal_to_code)
 
     def __get_col__(self, col):
         """
@@ -620,7 +624,7 @@ class Renum:
 
         self.dummy_snp = pd.DataFrame()
         self.dummy_snp[0] = animals
-        self.dummy_snp[1] = ['5' * 10] * len(self.dummy_snp[0])
+        self.dummy_snp[1] = ['0' * 2] * len(self.dummy_snp[0])
         self.dummy_snp[0] = self.dummy_snp[0].astype(str)
         max_name_len = self.dummy_snp[0].map(str).agg([len]).max().max()
         with open('dummy_snps.txt', 'w') as f:

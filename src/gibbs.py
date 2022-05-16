@@ -15,8 +15,10 @@ class Gibbs:
         :param animal_col: the column in data containing the ids of the animal - can be given as a string or as a number
         :param ped: dataframe containing animals' pedigree data - it is mandatory that it has 3 columns, the first one
         being the animals' ID, the second one the ID of the sire and the third one the ID of the dam
-        :param fixed_effects: dataframe containing animals' pedigree data - it is mandatory that it has 3 columns, the
-        first one being the animals' ID, the second one the ID of the sire and the third one the ID of the dam
+        :param fixed_effects: the fixed effects, which are given as an Iterable. Fixed effects can refer to one column
+        and can be either categorical or covariate, or refer to concatenation of multiple columns (which will be
+        considered categorical). They can also be nested, either one column is nested based on another one, or each
+        column for a concatenated effect is nested based on one column
         :param LHS: MME blocks of the left hand side of the equation not related to the (co)variances, unused for
         blupf90 wrappers
         :param RHS: MME blocks of the right hand side of the equation, unused for blupf90 wrappers
