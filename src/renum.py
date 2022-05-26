@@ -521,7 +521,7 @@ class Renum:
 
     def __add_size_constraint__(self):
         # Subject to change, may not be enough in some cases
-        self.file_lines.append('OPTION alpha_size 30')
+        self.file_lines.append('OPTION alpha_size 30\n')
 
     def __add_pev_pec__(self):
         """

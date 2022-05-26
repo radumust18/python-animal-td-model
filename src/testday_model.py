@@ -11,8 +11,8 @@ class TestDayModel:
                  res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10, rounds=5000,
                  burn_in=1000, sampling=10, sampling_print=10, use_blupf90_modules=False):
         """
-        Class used to implement the Animal Model with multiple traits and multiple fixed effects, as well as with
-        repeated records or not (which translates into with or without permanent environmental effects)
+        Class used to implement the Test-Day Model with multiple traits and multiple fixed effects and variable DIM
+        range
         :param data: dataframe containing animals' phenotypic data
         :param animal_col: the column in data containing the ids of the animal - can be given as a string or as a number
         :param lactation_col: used for test day model, represents the column in data which contains the lactation for
