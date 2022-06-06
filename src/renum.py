@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import os
+import operator
+from functools import reduce
 from pandas.core.dtypes.common import is_numeric_dtype, is_integer_dtype
 from scipy.special import legendre
 
@@ -45,6 +47,20 @@ def save_matrix(name, sym=True):
                 rez[y - 1, x - 1] = z
             line = f.readline()
     return rez
+
+
+def switch_to_no_inbreeding():
+    """
+    Used if inbreeding=False in a Renum object. Changes the line in renf90.par containing the string "add_an_upginb"
+    to "add_animal" in order to not account for inbreeding
+    :return:
+    """
+
+    with open('renf90.par') as f:
+        renf_lines = f.readlines()
+    new_renf_lines = list(map(lambda x: x.replace('add_an_upginb', 'add_animal'), renf_lines))
+    with open('renf90.par', 'w') as f:
+        f.writelines(new_renf_lines)
 
 
 class Renum:
@@ -178,12 +194,15 @@ class Renum:
             with open('genrenf90.par', 'w') as f:
                 f.writelines(self.file_lines)
             os.system('renumf90 genrenf90.par')
-            self.dummy_lines.extend(['SNP_FILE\n', 'dummy_snps.txt\n', 'OPTION saveAscii\n', 'OPTION saveAinv\n',
-                                     'OPTION saveA22\n', 'OPTION no_quality_control\n'])
-            self.__add_dummpy_snps__()
+            self.dummy_lines.extend(['SNP_FILE\n', 'dummy_snps.txt\n', 'OPTION no_quality_control\n',
+                                     'OPTION saveAscii\n', 'OPTION saveA22Inverse\n', 'OPTION saveA22\n'])
+            self.__add_animal_codes__()
+            self.__add_dummy_snps__()
             with open('genrenf90.par', 'w') as f:
                 f.writelines(self.dummy_lines)
             os.system('renumf90 genrenf90.par')
+            if not inbreeding:
+                switch_to_no_inbreeding()
             os.system('preGSf90 renf90.par')
 
             self.__save_A__()
@@ -198,6 +217,8 @@ class Renum:
             with open('genrenf90.par', 'w') as f:
                 f.writelines(self.file_lines)
             os.system('renumf90 genrenf90.par')
+            if not inbreeding:
+                switch_to_no_inbreeding()
 
             self.new_ped = self.ped.copy()
             self.new_ped.iloc[:, 0] = self.ped.iloc[:, 0].map(self.animal_to_code)
@@ -572,7 +593,7 @@ class Renum:
         self.A = save_matrix('A22')
 
     def __save_Ainv__(self):
-        self.Ainv = save_matrix('Ainv.txt')
+        self.Ainv = save_matrix('A22i')
 
     def __save_A22__(self):
         self.A22 = save_matrix('A22')
@@ -590,29 +611,20 @@ class Renum:
     def __save_Hinv__(self):
         self.Hinv = save_matrix('Hinv.txt')
 
-    def __add_dummpy_snps__(self):
+    def __add_animal_codes__(self):
         """
-        Construction of the dummy SNPs used to compute A matrix. Computing A matrix is done by actually computing an
-        A22 matrix, where all the animals from the pedigree have genotypes. This is why we will need a renaddXX.ped
-        file from a previous renumf90 run, so that we know which animals are kept by renumf90. It is assumed that
-        renumf90 was run previously (which is true, since we only use this method in __init__, just after a renumf90
-        run). We then find the renaddXX.ped file (IT IS NECESSARY THAT MULTIPLE RUNS OF RENUMF90 ARE NOT MIXED TOGETHER
-        OUTSIDE RUNNING THIS APP, OTHERWISE WE MAY END UP WITH TWO DIFFERENT RENADDXX.PED FILES AND THIS METHOD MAY
-        CHOOSE THE WRONG ONE). After the file is found, all animals IDs from the renumbered pedigree are stored. In
-        particular, two more dictionaries will be created and stored as fields: animal_to_code, which has animal IDs as
-        keys and renumbered indices as values, and code_to_animal, which has renumbered indices as keys and animal IDs
-        as values. The dummy SNPs dataframe is then created. For this, 10 values of 0 are used for each animal's SNPs.
-        We use 10 because blupf90 programs can't run with very few SNPs. The value of 0 is not mandatory, we could have
-        also used any other values such as 1 or 2 (it may even be more desirable to actually create a "realistic"
-        distribution of SNPs for the animals, though it would also be more computationally expensive). FInally, the
-        dummy SNPs are converted to a file respecting blupf90 programs requirements, just like in the
-        __write_snps_to_file__ method.
+        Associate animals' original IDs to their code given by renumf90. We find the renaddXX.ped file (IT IS NECESSARY
+        THAT MULTIPLE RUNS OF RENUMF90 ARE NOT MIXED TOGETHER OUTSIDE RUNNING THIS APP, OTHERWISE WE MAY END UP WITH TWO
+        DIFFERENT RENADDXX.PED FILES AND THIS METHOD MAY CHOOSE THE WRONG ONE). After the file is found, all animals IDs
+        from the renumbered pedigree are stored. In particular, two more dictionaries will be created and stored as
+        fields: animal_to_code, which has animal IDs as keys and renumbered indices as values, and code_to_animal,
+        which has renumbered indices as keys and animal IDs as values.
         :return: None
         """
         ped_file = [name for name in os.listdir('.') if name.startswith('renadd')][0]
         self.animal_to_code = {}
         self.code_to_animal = {}
-        animals = []
+        self.animals = []
         with open(ped_file) as f:
             lines = f.readlines()
             self.animal_count = len(lines)
@@ -620,11 +632,23 @@ class Renum:
                 values = line.strip().split()
                 self.animal_to_code[values[-1]] = int(values[0])
                 self.code_to_animal[int(values[0])] = values[-1]
-                animals.append(values[-1])
+                self.animals.append(values[-1])
+
+    def __add_dummy_snps__(self):
+        """
+        Construction of the dummy SNPs used to compute A matrix. Computing A matrix is done by actually computing an
+        A22 matrix, where all the animals from the pedigree have genotypes. It is assumed that
+        renumf90 was run previously (which is true, since we only use this method in __init__, just after a renumf90
+        run). The dummy SNPs dataframe is then created. For this, 10 values of 5 are used for each animal's SNPs.
+        We use 10 because blupf90 programs can't run with very few SNPs. Values of 5 represent missing genotypes, which
+        is actually the case. Finally, the dummy SNPs are converted to a file respecting blupf90 programs requirements,
+        just like in the __write_snps_to_file__ method.
+        :return: None
+        """
 
         self.dummy_snp = pd.DataFrame()
-        self.dummy_snp[0] = animals
-        self.dummy_snp[1] = ['0' * 2] * len(self.dummy_snp[0])
+        self.dummy_snp[0] = self.animals
+        self.dummy_snp[1] = ['5' * 10] * len(self.dummy_snp[0])
         self.dummy_snp[0] = self.dummy_snp[0].astype(str)
         max_name_len = self.dummy_snp[0].map(str).agg([len]).max().max()
         with open('dummy_snps.txt', 'w') as f:
