@@ -77,8 +77,8 @@ class TestDayModel:
         self.number_of_traits = len(trait_cols)
         self.additive_coefficients = np.zeros((self.number_of_traits, self.renum.animal_count, self.random_degree + 1))
         self.permanent_coefficients = np.zeros((self.number_of_traits, self.renum.animal_count, self.random_degree + 1))
-        self.EBV = np.zeros((self.number_of_traits, self.renum.animal_count))
-        self.PE = np.zeros((self.number_of_traits, self.renum.animal_count))
+        self.EBV = np.zeros((self.number_of_traits, self.renum.animal_count, dim_range[1] - dim_range[0] + 1))
+        self.PE = np.zeros((self.number_of_traits, self.renum.animal_count, dim_range[1] - dim_range[0] + 1))
 
         if use_blupf90_modules:
             self.__estimate_parameters__()
@@ -257,7 +257,7 @@ class TestDayModel:
         """
         for i in range(self.number_of_traits):
             for j in range(self.renum.animal_count):
-                self.EBV[i, j] = self.legendre_partial_sums[:, range(self.random_degree)].T\
+                self.EBV[i, j, :] = self.legendre_partial_sums[:, range(self.random_degree)]\
                                     @ self.additive_coefficients[i, j, :]
-                self.PE[i, j] = self.legendre_partial_sums[
-                                   :, range(self.random_degree)].T @ self.permanent_coefficients[i, j, :]
+                self.PE[i, j, :] = self.legendre_partial_sums[
+                                   :, range(self.random_degree)] @ self.permanent_coefficients[i, j, :]
