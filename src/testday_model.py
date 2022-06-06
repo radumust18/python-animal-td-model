@@ -1,5 +1,6 @@
 import os
 import numpy as np
+from scipy.special import legendre
 
 from gibbs import Gibbs
 from reml import REML
@@ -65,22 +66,33 @@ class TestDayModel:
         self.sampling_print = sampling_print
         self.fixed_degree = fixed_degree
         self.random_degree = random_degree
+        self.degree = max(self.fixed_degree, self.random_degree)
         self.G = None
         self.P = None
         self.R = None
         self.fixed_effects = fixed_effects
         self.FE = []
         self.fixed_curve_coefficients = []
-        self.additive_coefficients = np.zeros((len(trait_cols), self.renum.animal_count, self.random_degree + 1))
-        self.permanent_coefficients = np.zeros((len(trait_cols), self.renum.animal_count, self.random_degree + 1))
+        self.fixed_curve_values = None
+        self.number_of_traits = len(trait_cols)
+        self.additive_coefficients = np.zeros((self.number_of_traits, self.renum.animal_count, self.random_degree + 1))
+        self.permanent_coefficients = np.zeros((self.number_of_traits, self.renum.animal_count, self.random_degree + 1))
+        self.EBV = np.zeros((self.number_of_traits, self.renum.animal_count))
+        self.PE = np.zeros((self.number_of_traits, self.renum.animal_count))
 
         if use_blupf90_modules:
             self.__estimate_parameters__()
             self.__add_updated_genetic_parameters__()
             os.system('blupf90 renf90.par')
+            self.__read_blupf90_solutions__()
 
         self.scaled_dim_range = np.arange(dim_range[0], dim_range[1] + 1)
         self.scaled_dim_range = -1 + 2 * (self.scaled_dim_range - dim_range[0]) / (self.scaled_dim_range - dim_range[1])
+        self.legendre_coefficients = np.zeros((dim_range[1] - dim_range[0] + 1, self.degree))
+        self.legendre_partial_sums = np.cumsum(self.legendre_coefficients, axis=0)
+        self.__add_legendre_coefficients__()
+        self.__compute_fixed_curve_values__()
+        self.__compute_random_curves_values__()
 
     def __estimate_parameters__(self):
         """
@@ -219,3 +231,33 @@ class TestDayModel:
                 line = f.readline()
             self.FE = np.array(self.FE)
             self.fixed_curve_coefficients = np.array(self.fixed_curve_coefficients)
+
+    def __add_legendre_coefficients__(self):
+        """
+        Computes the Legendre polynomials values for all scaled days in the given DIM range, which will be used for
+        both fixed and random lactation curves
+        :return: None
+        """
+        for i in range(self.degree):
+            self.legendre_coefficients[:, i] = legendre(i)(self.scaled_dim_range) * np.sqrt(i + 0.5)
+
+    def __compute_fixed_curve_values__(self):
+        """
+        Computes the fixed lactation curve values over the whole given DIM range
+        :return: None
+        """
+        self.fixed_curve_values = self.legendre_partial_sums[
+                                  :, range(self.fixed_degree)].T @ self.fixed_curve_coefficients
+
+    def __compute_random_curves_values__(self):
+        """
+        Computes the random lactation curves values over the whole given DIM range, that is, the EBVs and permanent
+        effects
+        :return: None
+        """
+        for i in range(self.number_of_traits):
+            for j in range(self.renum.animal_count):
+                self.EBV[i, j] = self.legendre_partial_sums[:, range(self.random_degree)].T\
+                                    @ self.additive_coefficients[i, j, :]
+                self.PE[i, j] = self.legendre_partial_sums[
+                                   :, range(self.random_degree)].T @ self.permanent_coefficients[i, j, :]
