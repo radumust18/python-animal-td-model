@@ -257,6 +257,7 @@ class Renum:
                 raise ValueError("Lactation column should only have integer values")
             if self.data.iloc[:, mod_col - 1].min() <= 0:
                 raise ValueError("Lactation column values should be higher than 0")
+            self.lactation_dim = self.data.iloc[:, mod_col - 1].max()
         else:
             self.lactation_dim = 1
 
@@ -290,8 +291,8 @@ class Renum:
         renumf90 will be multiplied by the number of lactations in our data
         :return: None
         """
-        self.file_lines.append(' '.join(map(str, range(self.fixed_count + max(self.degree, 0) + 1, self.fixed_count +
-                                                       max(self.degree, 0) + self.traits_count * self.lactation_dim
+        self.file_lines.append(' '.join(map(str, range(self.fixed_count + self.degree + 2, self.fixed_count +
+                                                       self.degree + 1 + self.traits_count * self.lactation_dim
                                                        + 1))) + '\n')
 
     def __add_res_variance__(self):
@@ -391,13 +392,13 @@ class Renum:
                         raise ValueError('Covariate nested effect', nested, 'has non-numeric values')
                     self.file_lines.extend(['EFFECT\n', (str(count) + ' ') * self.traits_count + cat
                                             + (' numer\n' if cat == 'cross' else ' \n'), 'NESTED\n',
-                                            (str(self.fixed_count + max(self.degree, 0) + nested_count) + ' ')
+                                            (str(self.fixed_count + self.degree + 1 + nested_count) + ' ')
                                             * self.traits_count + ' ' + nested_cat
                                             + (' \n' if nested_cat == 'cov' else 'numer\n'
                                             if is_numeric_dtype(self.data.iloc[:, mod_nested - 1]) else ' alpha\n')])
                     self.new_data[count] = self.data.iloc[:, mod_col - 1]
-                    self.new_data[self.fixed_count + max(self.degree, 0) + nested_count] = self.data.iloc[
-                                                                                           :, mod_nested - 1]
+                    self.new_data[self.fixed_count + self.degree + 1 + nested_count] = self.data.iloc[
+                                                                                       :, mod_nested - 1]
                     nested_count += 1
                     self.nested_count += 1
             else:
@@ -413,7 +414,7 @@ class Renum:
                 if i <= self.fixed_degree:
                     # Legendre fixed coefficients have their indices right after the fixed effects
                     self.file_lines.extend(['EFFECT\n', (str(self.fixed_count + i + 1) + ' ') * self.traits_count
-                                            + ' cov\n'])
+                                            + 'cov\n'])
 
     def __add_traits_to_renumf90_pheno__(self):
         """
@@ -425,15 +426,12 @@ class Renum:
         :return: None
         """
         count = 1
-        for idx in self.trait_cols_idx:
-            trait_data = self.data.iloc[:, idx - 1]
-            if self.lactation_dim == 1:
-                self.new_data[self.fixed_count + max(self.degree, 0) + self.nested_count + count] = trait_data
-            else:
-                for i in range(self.lactation_dim):
-                    self.new_data[self.fixed_count + max(self.degree, 0) + self.nested_count + count] \
-                        = trait_data * (self.data.iloc[:, self.__get_col__(self.lactation_col) - 1] == i + 1)
-                    count += 1
+        for i in range(self.lactation_dim):
+            for idx in self.trait_cols_idx:
+                trait_data = self.data.iloc[:, idx - 1]
+                self.new_data[self.fixed_count + self.degree + 1 + self.nested_count + count] \
+                    = trait_data * (self.data.iloc[:, self.__get_col__(self.lactation_col) - 1] == i + 1)
+            count += 1
 
     def __add_animal_effect__(self):
         """
@@ -441,8 +439,7 @@ class Renum:
         polynomials, nested columns and traits, hence the index used for the animal effect
         :return: None
         """
-        col_idx = self.fixed_count + max(self.degree,
-                                         0) + self.nested_count + self.traits_count * self.lactation_dim + 1
+        col_idx = self.fixed_count + self.degree + 1 + self.nested_count + self.traits_count * self.lactation_dim + 1
         self.new_data[col_idx] = self.data.iloc[:, self.animal_col - 1]
         self.file_lines.extend(['EFFECT\n', (str(col_idx) + ' ') * self.traits_count + 'cross alpha\n', 'RANDOM\n',
                                 'animal\n'])
@@ -461,7 +458,7 @@ class Renum:
         self.ped.to_csv('ped.txt', sep=' ', header=False, index=False)
         self.file_lines.extend(['FILE\n', 'ped.txt\n', 'FILE_POS\n', '1 2 3 0 0\n'])
         self.__add_snps__()
-        self.file_lines.extend(['PED_DEPTH\n', '0\n'])
+        self.file_lines.extend(['PED_DEPTH\n', '100\n'])
 
     def __add_snps__(self):
         """
@@ -498,7 +495,7 @@ class Renum:
         if self.random_degree >= 0:
             self.file_lines.extend(['RANDOM_REGRESSION\n', 'data\n', 'RR_POSITION\n',
                                     ' '.join(map(str, range(self.fixed_count + 1,
-                                                            self.fixed_count + self.random_degree + 2)))])
+                                                            self.fixed_count + self.random_degree + 2))) + '\n'])
 
     def __add_variances__(self):
         """

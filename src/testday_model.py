@@ -71,14 +71,20 @@ class TestDayModel:
         self.P = None
         self.R = None
         self.fixed_effects = fixed_effects
-        self.FE = []
-        self.fixed_curve_coefficients = []
-        self.fixed_curve_values = None
         self.number_of_traits = len(trait_cols)
-        self.additive_coefficients = np.zeros((self.number_of_traits, self.renum.animal_count, self.random_degree + 1))
-        self.permanent_coefficients = np.zeros((self.number_of_traits, self.renum.animal_count, self.random_degree + 1))
-        self.EBV = np.zeros((self.number_of_traits, self.renum.animal_count, dim_range[1] - dim_range[0] + 1))
-        self.PE = np.zeros((self.number_of_traits, self.renum.animal_count, dim_range[1] - dim_range[0] + 1))
+        self.FE = []
+        self.fixed_curve_coefficients = np.zeros((self.renum.lactation_dim, self.number_of_traits,
+                                                  self.fixed_degree + 1))
+        self.fixed_curve_values = np.zeros((self.renum.lactation_dim, self.number_of_traits,
+                                            dim_range[1] - dim_range[0] + 1))
+        self.additive_coefficients = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
+                                               self.random_degree + 1))
+        self.permanent_coefficients = np.zeros((self.renum.lactation_dim, self.number_of_traits,
+                                                self.renum.animal_count, self.random_degree + 1))
+        self.EBV = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
+                             dim_range[1] - dim_range[0] + 1))
+        self.PE = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
+                            dim_range[1] - dim_range[0] + 1))
 
         if use_blupf90_modules:
             self.__estimate_parameters__()
@@ -87,8 +93,8 @@ class TestDayModel:
             self.__read_blupf90_solutions__()
 
         self.scaled_dim_range = np.arange(dim_range[0], dim_range[1] + 1)
-        self.scaled_dim_range = -1 + 2 * (self.scaled_dim_range - dim_range[0]) / (self.scaled_dim_range - dim_range[1])
-        self.legendre_coefficients = np.zeros((dim_range[1] - dim_range[0] + 1, self.degree))
+        self.scaled_dim_range = -1 + 2 * (self.scaled_dim_range - dim_range[0]) / (dim_range[1] - dim_range[0])
+        self.legendre_coefficients = np.zeros((dim_range[1] - dim_range[0] + 1, self.degree + 1))
         self.legendre_partial_sums = np.cumsum(self.legendre_coefficients, axis=0)
         self.__add_legendre_coefficients__()
         self.__compute_fixed_curve_values__()
@@ -172,23 +178,20 @@ class TestDayModel:
                         read_additive = True
                     file_lines.append(line)
                 elif read_residual:
+                    file_lines.append(' '.join(map(str, self.R[residual_line])) + '\n')
+                    residual_line += 1
                     if residual_line >= self.R.shape[0]:
                         read_residual = False
-                    else:
-                        file_lines.append(' '.join(map(str, self.R[residual_line])) + '\n')
-                        residual_line += 1
                 elif read_additive:
+                    file_lines.append(' '.join(map(str, self.G[additive_line])) + '\n')
+                    additive_line += 1
                     if additive_line >= self.G.shape[0]:
                         read_additive = False
-                    else:
-                        file_lines.append(' '.join(map(str, self.G[additive_line])) + '\n')
-                        additive_line += 1
                 elif read_permanent:
+                    file_lines.append(' '.join(map(str, self.P[permanent_line])) + '\n')
+                    permanent_line += 1
                     if permanent_line >= self.P.shape[0]:
                         read_permanent = False
-                    else:
-                        file_lines.append(' '.join(map(str, self.P[permanent_line])) + '\n')
-                        permanent_line += 1
                 else:
                     file_lines.append(line)
         with open('renf90.par', 'w') as f:
@@ -220,17 +223,20 @@ class TestDayModel:
                     self.FE.append(solution)
                 else:
                     if effect <= len(self.fixed_effects) + self.fixed_degree + 1:
-                        self.fixed_curve_coefficients.append(solution)
+                        self.fixed_curve_coefficients[(trait - 1) // self.renum.lactation_dim,
+                                                      (trait - 1) % self.renum.lactation_dim,
+                                                      effect - len(self.fixed_effects) - 1] = solution
                     elif effect <= len(self.fixed_effects) + self.fixed_degree + self.random_degree + 2:
-                        self.additive_coefficients[trait - 1, level - 1,
+                        self.additive_coefficients[(trait - 1) // self.renum.lactation_dim,
+                                                   (trait - 1) % self.renum.lactation_dim, level - 1,
                                                    effect - len(self.fixed_effects) - self.fixed_degree - 2] = solution
                     else:
-                        self.permanent_coefficients[trait - 1, level - 1,
+                        self.permanent_coefficients[(trait - 1) // self.renum.lactation_dim,
+                                                    (trait - 1) % self.renum.lactation_dim, level - 1,
                                                     effect - len(self.fixed_effects) - self.fixed_degree
                                                     - self.random_degree - 3] = solution
                 line = f.readline()
             self.FE = np.array(self.FE)
-            self.fixed_curve_coefficients = np.array(self.fixed_curve_coefficients)
 
     def __add_legendre_coefficients__(self):
         """
@@ -238,7 +244,7 @@ class TestDayModel:
         both fixed and random lactation curves
         :return: None
         """
-        for i in range(self.degree):
+        for i in range(self.degree + 1):
             self.legendre_coefficients[:, i] = legendre(i)(self.scaled_dim_range) * np.sqrt(i + 0.5)
 
     def __compute_fixed_curve_values__(self):
@@ -246,8 +252,10 @@ class TestDayModel:
         Computes the fixed lactation curve values over the whole given DIM range
         :return: None
         """
-        self.fixed_curve_values = self.legendre_partial_sums[
-                                  :, range(self.fixed_degree)].T @ self.fixed_curve_coefficients
+        for i in range(self.renum.lactation_dim):
+            for j in range(self.number_of_traits):
+                self.fixed_curve_values[i, j, :] = self.legendre_partial_sums[:, range(self.fixed_degree + 1)]\
+                                                   @ self.fixed_curve_coefficients[i, j, :].T
 
     def __compute_random_curves_values__(self):
         """
@@ -255,9 +263,10 @@ class TestDayModel:
         effects
         :return: None
         """
-        for i in range(self.number_of_traits):
-            for j in range(self.renum.animal_count):
-                self.EBV[i, j, :] = self.legendre_partial_sums[:, range(self.random_degree)]\
-                                    @ self.additive_coefficients[i, j, :]
-                self.PE[i, j, :] = self.legendre_partial_sums[
-                                   :, range(self.random_degree)] @ self.permanent_coefficients[i, j, :]
+        for i in range(self.renum.lactation_dim):
+            for j in range(self.number_of_traits):
+                for k in range(self.renum.animal_count):
+                    self.EBV[i, j, k, :] = self.legendre_partial_sums[:, range(self.random_degree + 1)]\
+                                           @ self.additive_coefficients[i, j, k, :]
+                    self.PE[i, j, k, :] = self.legendre_partial_sums[
+                                          :, range(self.random_degree + 1)] @ self.permanent_coefficients[i, j, k, :]

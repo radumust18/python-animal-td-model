@@ -149,23 +149,20 @@ class AnimalModel:
                         read_additive = True
                     file_lines.append(line)
                 elif read_residual:
+                    file_lines.append(' '.join(map(str, self.R[residual_line])) + '\n')
+                    residual_line += 1
                     if residual_line >= self.R.shape[0]:
                         read_residual = False
-                    else:
-                        file_lines.append(' '.join(map(str, self.R[residual_line])) + '\n')
-                        residual_line += 1
                 elif read_additive:
+                    file_lines.append(' '.join(map(str, self.G[additive_line])) + '\n')
+                    additive_line += 1
                     if additive_line >= self.G.shape[0]:
                         read_additive = False
-                    else:
-                        file_lines.append(' '.join(map(str, self.G[additive_line])) + '\n')
-                        additive_line += 1
                 elif read_permanent:
+                    file_lines.append(' '.join(map(str, self.P[permanent_line])) + '\n')
+                    permanent_line += 1
                     if permanent_line >= self.P.shape[0]:
                         read_permanent = False
-                    else:
-                        file_lines.append(' '.join(map(str, self.P[permanent_line])) + '\n')
-                        permanent_line += 1
                 else:
                     file_lines.append(line)
         with open('renf90.par', 'w') as f:
