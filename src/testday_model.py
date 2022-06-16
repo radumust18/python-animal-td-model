@@ -7,8 +7,18 @@ from reml import REML
 from renum import Renum
 
 
+def add_sol_se():
+    """
+    Adds option to compute standard errors among solutions when using BLUPF90, since they can be further used to
+    compute other metrics such as PEVs (prediction error variances)
+    :return: None
+    """
+    with open('renf90.par', 'a') as f:
+        f.write('OPTION sol se\n')
+
+
 class TestDayModel:
-    def __init__(self, data, animal_col, lactation_col, dim_col, fixed_effects, trait_cols, ped, inbreeding=False,
+    def __init__(self, data, animal_col, lactation_col, dim_col, fixed_effects, trait_cols, ped=None, inbreeding=False,
                  dim_range=None, fixed_degree=4, random_degree=2, genomic_data=None, ag_variance=None,
                  res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10, rounds=5000,
                  burn_in=1000, sampling=10, sampling_print=10, use_blupf90_modules=False):
@@ -81,14 +91,16 @@ class TestDayModel:
                                                self.random_degree + 1))
         self.permanent_coefficients = np.zeros((self.renum.lactation_dim, self.number_of_traits,
                                                 self.renum.animal_count, self.random_degree + 1))
-        self.EBV = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
-                             dim_range[1] - dim_range[0] + 1))
-        self.PE = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
-                            dim_range[1] - dim_range[0] + 1))
+        self.EBVs = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
+                              dim_range[1] - dim_range[0] + 1))
+        self.PERMs = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
+                               dim_range[1] - dim_range[0] + 1))
+        self.heritabilities = np.zeros((len(trait_cols) * self.renum.lactation_dim, dim_range[1] - dim_range[0] + 1))
 
         if use_blupf90_modules:
             self.__estimate_parameters__()
             self.__add_updated_genetic_parameters__()
+            add_sol_se()
             os.system('blupf90 renf90.par')
             self.__read_blupf90_solutions__()
 
@@ -96,9 +108,20 @@ class TestDayModel:
         self.scaled_dim_range = -1 + 2 * (self.scaled_dim_range - dim_range[0]) / (dim_range[1] - dim_range[0])
         self.legendre_coefficients = np.zeros((dim_range[1] - dim_range[0] + 1, self.degree + 1))
         self.legendre_partial_sums = np.cumsum(self.legendre_coefficients, axis=0)
+        self.legendre_random_sums = self.legendre_partial_sums[:, range(random_degree + 1)]
         self.__add_legendre_coefficients__()
         self.__compute_fixed_curve_values__()
         self.__compute_random_curves_values__()
+
+        for i in range(len(trait_cols) * self.renum.lactation_dim):
+            var_a = self.legendre_random_sums\
+                    @ self.variance_estimator.G[i * (random_degree + 1):(i + 1) * random_degree + 1]\
+                    @ self.legendre_random_sums.T
+            var_p = self.legendre_random_sums\
+                    @ self.variance_estimator.P[i * (random_degree + 1):(i + 1) * random_degree + 1]\
+                    @ self.legendre_random_sums.T
+            var_r = np.array([[self.variance_estimator.R[i, i]] * (dim_range[1] - dim_range[0] + 1)])
+            self.heritabilities[i] = var_a / (var_a + var_p + var_r)
 
     def __estimate_parameters__(self):
         """
@@ -223,16 +246,16 @@ class TestDayModel:
                     self.FE.append(solution)
                 else:
                     if effect <= len(self.fixed_effects) + self.fixed_degree + 1:
-                        self.fixed_curve_coefficients[(trait - 1) // self.renum.lactation_dim,
-                                                      (trait - 1) % self.renum.lactation_dim,
+                        self.fixed_curve_coefficients[(trait - 1) // self.number_of_traits,
+                                                      (trait - 1) % self.number_of_traits,
                                                       effect - len(self.fixed_effects) - 1] = solution
                     elif effect <= len(self.fixed_effects) + self.fixed_degree + self.random_degree + 2:
-                        self.additive_coefficients[(trait - 1) // self.renum.lactation_dim,
-                                                   (trait - 1) % self.renum.lactation_dim, level - 1,
+                        self.additive_coefficients[(trait - 1) // self.number_of_traits,
+                                                   (trait - 1) % self.number_of_traits, level - 1,
                                                    effect - len(self.fixed_effects) - self.fixed_degree - 2] = solution
                     else:
-                        self.permanent_coefficients[(trait - 1) // self.renum.lactation_dim,
-                                                    (trait - 1) % self.renum.lactation_dim, level - 1,
+                        self.permanent_coefficients[(trait - 1) // self.number_of_traits,
+                                                    (trait - 1) % self.number_of_traits, level - 1,
                                                     effect - len(self.fixed_effects) - self.fixed_degree
                                                     - self.random_degree - 3] = solution
                 line = f.readline()
@@ -266,7 +289,7 @@ class TestDayModel:
         for i in range(self.renum.lactation_dim):
             for j in range(self.number_of_traits):
                 for k in range(self.renum.animal_count):
-                    self.EBV[i, j, k, :] = self.legendre_partial_sums[:, range(self.random_degree + 1)]\
-                                           @ self.additive_coefficients[i, j, k, :]
-                    self.PE[i, j, k, :] = self.legendre_partial_sums[
-                                          :, range(self.random_degree + 1)] @ self.permanent_coefficients[i, j, k, :]
+                    self.EBVs[i, j, k, :] = self.legendre_partial_sums[:, range(self.random_degree + 1)]\
+                                            @ self.additive_coefficients[i, j, k, :]
+                    self.PERMs[i, j, k, :] = self.legendre_partial_sums[
+                                             :, range(self.random_degree + 1)] @ self.permanent_coefficients[i, j, k, :]

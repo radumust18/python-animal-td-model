@@ -1,4 +1,5 @@
 import os
+from time import time
 
 import numpy as np
 
@@ -40,6 +41,7 @@ class REML:
         :param make_blupf90_files: boolean parameter, if True, renumf90 type of files would be built based on our
         pedigree, unused yet
         """
+        self.start = time()
         if use_blupf90_modules:
             # First of all, we check the existence of a renf90.par file. If such file does not exist, then renumf90
             # has not been used before, which should have not been the case. Otherwise, we check that the given REML
@@ -76,16 +78,22 @@ class REML:
                     g_list, p_list, r_list = [], [], []
                     for line in f.readlines():
                         if 'Genetic variance(s)' in line:
-                            if g_read:
+                            if g_list:
                                 p_read, g_read = True, False
                             else:
                                 g_read = True
                         elif 'Residual variance(s)' in line:
                             g_read, p_read, r_read = False, False, True
                         elif g_read:
-                            g_list.extend(list(map(float, line.split())))
+                            try:
+                                g_list.extend(list(map(float, line.split())))
+                            except ValueError:
+                                g_read = False
                         elif p_read:
-                            p_list.extend(list(map(float, line.split())))
+                            try:
+                                p_list.extend(list(map(float, line.split())))
+                            except ValueError:
+                                p_read = False
                         elif r_read:
                             try:
                                 r_list.extend(list(map(float, line.split())))
@@ -95,8 +103,12 @@ class REML:
                     size_g, size_p, size_r = int(np.sqrt(len(g_list))), int(np.sqrt(len(p_list))), int(
                         np.sqrt(len(r_list)))
                     self.G = np.array(g_list).reshape(size_g, size_g)
-                    self.P = np.array(p_list).reshape(size_p, size_p)
+                    if p_list:
+                        self.P = np.array(p_list).reshape(size_p, size_p)
+                    else:
+                        self.P = None
                     self.R = np.array(r_list).reshape(size_r, size_r)
             else:
                 raise FileNotFoundError('Could not find renf90.par file - you should use Renum class first before '
                                         + 'REML class')
+        self.duration = time() - self.start

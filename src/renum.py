@@ -1,8 +1,6 @@
 import pandas as pd
 import numpy as np
 import os
-import operator
-from functools import reduce
 from pandas.core.dtypes.common import is_numeric_dtype, is_integer_dtype
 from scipy.special import legendre
 
@@ -61,6 +59,18 @@ def switch_to_no_inbreeding():
     new_renf_lines = list(map(lambda x: x.replace('add_an_upginb', 'add_animal'), renf_lines))
     with open('renf90.par', 'w') as f:
         f.writelines(new_renf_lines)
+
+
+def remove_save_lines():
+    """
+    Removes saving options line from the parameter file, so they are not needlessly executed again
+    :return: None
+    """
+    with open('renf90.par') as f:
+        file_lines = f.readlines()
+        no_save_lines = list(filter(lambda x: 'OPTION save' not in x, file_lines))
+    with open('renf90.par', 'w') as f:
+        f.writelines(no_save_lines)
 
 
 class Renum:
@@ -150,6 +160,8 @@ class Renum:
         self.Hinv = None
         self.A22 = None
         self.A22inv = None
+        self.animal_to_code = {}
+        self.code_to_animal = {}
 
         if use_blupf90_modules:
             # Stores the lines that will be written in the renumf90 file
@@ -166,6 +178,7 @@ class Renum:
             self.__check_traits__()
             self.__check_lactation_col__()
             self.__check_dim_col__()
+            self.__check_pure_gblup__()
             self.__add_traits_line__()
             self.file_lines.append('FIELDS_PASSED TO OUTPUT\n')
             self.file_lines.append('\n')
@@ -191,22 +204,23 @@ class Renum:
             # in order to have consistent results. Thus, we will run renumf90 once and use the renaddXX.ped file to
             # determine which animals are part of the renumbered pedigree. Then, we will build a dummy renumf90 file
             # using dummy SNPs for each animal in the pedigree and running preGSf90 will compute the A matrix
-            with open('genrenf90.par', 'w') as f:
-                f.writelines(self.file_lines)
-            os.system('renumf90 genrenf90.par')
-            self.dummy_lines.extend(['SNP_FILE\n', 'dummy_snps.txt\n', 'OPTION no_quality_control\n',
-                                     'OPTION saveAscii\n', 'OPTION saveA22Inverse\n', 'OPTION saveA22\n'])
-            self.__add_animal_codes__()
-            self.__add_dummy_snps__()
-            with open('genrenf90.par', 'w') as f:
-                f.writelines(self.dummy_lines)
-            os.system('renumf90 genrenf90.par')
-            if not inbreeding:
-                switch_to_no_inbreeding()
-            os.system('preGSf90 renf90.par')
+            if ped is not None:
+                with open('genrenf90.par', 'w') as f:
+                    f.writelines(self.file_lines)
+                os.system('renumf90 genrenf90.par')
+                self.dummy_lines.extend(['SNP_FILE\n', 'dummy_snps.txt\n', 'OPTION no_quality_control\n',
+                                         'OPTION saveAscii\n', 'OPTION saveA22Inverse\n', 'OPTION saveA22\n'])
+                self.__add_animal_codes__()
+                self.__add_dummy_snps__()
+                with open('genrenf90.par', 'w') as f:
+                    f.writelines(self.dummy_lines)
+                os.system('renumf90 genrenf90.par')
+                if not inbreeding:
+                    switch_to_no_inbreeding()
+                os.system('preGSf90 renf90.par')
 
-            self.__save_A__()
-            self.__save_Ainv__()
+                self.__save_A__()
+                self.__save_Ainv__()
 
             # Finally, we add actual genomic data in the renumf90 files if data is available and then we run the final
             # iteration of renumf90. We also make sure to only add pev-pec options if we have random regression
@@ -216,12 +230,18 @@ class Renum:
                 self.__add_pev_pec__()
             with open('genrenf90.par', 'w') as f:
                 f.writelines(self.file_lines)
-            os.system('renumf90 genrenf90.par')
-            if not inbreeding:
-                switch_to_no_inbreeding()
+            if self.genomic_data is None:
+                os.system('renumf90 genrenf90.par')
+                if not inbreeding:
+                    switch_to_no_inbreeding()
+            if not self.animal_to_code:
+                self.__add_animal_codes__()
 
-            self.new_ped = self.ped.copy()
-            self.new_ped.iloc[:, 0] = self.ped.iloc[:, 0].map(self.animal_to_code)
+            if self.ped is not None:
+                self.new_ped = self.ped.copy()
+                self.new_ped.iloc[:, 0] = self.ped.iloc[:, 0].map(self.animal_to_code)
+
+            remove_save_lines()
 
     def __get_col__(self, col):
         """
@@ -429,9 +449,12 @@ class Renum:
         for i in range(self.lactation_dim):
             for idx in self.trait_cols_idx:
                 trait_data = self.data.iloc[:, idx - 1]
-                self.new_data[self.fixed_count + self.degree + 1 + self.nested_count + count] \
-                    = trait_data * (self.data.iloc[:, self.__get_col__(self.lactation_col) - 1] == i + 1)
-            count += 1
+                if self.lactation_col is None:
+                    self.new_data[self.fixed_count + self.degree + 1 + self.nested_count + count] = trait_data
+                else:
+                    self.new_data[self.fixed_count + self.degree + 1 + self.nested_count + count]\
+                        = trait_data * (self.data.iloc[:, self.__get_col__(self.lactation_col) - 1] == i + 1)
+                count += 1
 
     def __add_animal_effect__(self):
         """
@@ -455,10 +478,12 @@ class Renum:
             self.has_perm = True
 
     def __add_pedigree__(self):
-        self.ped.to_csv('ped.txt', sep=' ', header=False, index=False)
-        self.file_lines.extend(['FILE\n', 'ped.txt\n', 'FILE_POS\n', '1 2 3 0 0\n'])
+        if self.ped is not None:
+            self.ped.to_csv('ped.txt', sep=' ', header=False, index=False)
+            self.file_lines.extend(['FILE\n', 'ped.txt\n', 'FILE_POS\n', '1 2 3 0 0\n'])
         self.__add_snps__()
-        self.file_lines.extend(['PED_DEPTH\n', '100\n'])
+        if self.ped is not None:
+            self.file_lines.extend(['PED_DEPTH\n', '100\n'])
 
     def __add_snps__(self):
         """
@@ -470,17 +495,17 @@ class Renum:
         values of A matrix or its inverse
         :return:
         """
+        self.dummy_lines = self.file_lines.copy()
         if self.genomic_data is not None:
             self.snp_data = pd.DataFrame()
             for col in self.genomic_data.columns[1:]:
                 genomic_col = self.genomic_data[col]
                 if (not is_integer_dtype(genomic_col)) or genomic_col.min() < 0 or genomic_col.max() > 2:
                     raise ValueError('Invalid SNPs values - should only be 0, 1 or 2')
-            self.snp_data[0] = self.genomic_data[0].astype(str)
-            self.snp_data[1] = self.genomic_data[:, 1:].astype(str).apply(''.join, axis=1)
+            self.snp_data[0] = self.genomic_data.iloc[:, 0].astype(str)
+            self.snp_data[1] = self.genomic_data.iloc[:, 1:].astype(str).apply(''.join, axis=1)
             self.file_lines.extend(['SNP_FILE\n', 'snps.txt\n'])
             self.__write_snps_to_file__()
-        self.dummy_lines = self.file_lines.copy()
 
     def __add_inbreeding__(self):
         if self.inbreeding:
@@ -557,18 +582,25 @@ class Renum:
         :return: None
         """
         if self.genomic_data is not None:
-            self.file_lines.extend(['OPTION saveAscii\n', 'OPTION saveHinv\n', 'OPTION saveA22\n',
-                                    'OPTION saveA22Inverse\n', 'OPTION saveG\n', 'OPTION saveGInverse\n',
-                                    'OPTION no_quality_control\n'])
+            self.file_lines.append('OPTION saveAscii\n')
+            if self.ped is not None:
+                self.file_lines.extend(['OPTION saveHinv\n', 'OPTION saveA22\n', 'OPTION saveA22Inverse\n'])
+            self.file_lines.extend(['OPTION saveG\n', 'OPTION saveGInverse\n', 'OPTION no_quality_control\n'])
+            if self.ped is None:
+                self.file_lines.extend(['OPTION tunedG 0\n'])
             with open('genrenf90.par', 'w') as f:
                 f.writelines(self.file_lines)
             os.system('renumf90 genrenf90.par')
+            if not self.inbreeding:
+                switch_to_no_inbreeding()
             os.system('preGSf90 renf90.par')
-            self.__save_A22__()
-            self.__save_A22inv__()
+            if self.ped is not None:
+                self.__save_A22__()
+                self.__save_A22inv__()
             self.__save_G__()
             self.__save_Ginv__()
-            self.__save_Hinv__()
+            if self.ped is not None:
+                self.__save_Hinv__()
 
     def __write_snps_to_file__(self):
         """
@@ -602,7 +634,6 @@ class Renum:
         self.G = save_matrix('G')
 
     def __save_Ginv__(self):
-        size = self.genomic_data.shape[0]
         self.Ginv = save_matrix('Gi')
 
     def __save_Hinv__(self):
@@ -653,3 +684,19 @@ class Renum:
                 name = self.dummy_snp.loc[idx, 0]
                 snps = self.dummy_snp.loc[idx, 1]
                 f.write(name + ' ' * (max_name_len - len(name) + 1) + snps + '\n')
+
+    def __check_pure_gblup__(self):
+        """
+        When there is no pedigree given, we need to check if conditions for pure GBLUP are met. That means that we need
+        to have genomic data available and it also means that all animals in the phenotypic data have to be present in
+        the genomic data
+        :return: None
+        """
+        if self.ped is None:
+            if self.genomic_data is None:
+                raise ValueError('It is not possible to perform analysis with neither pedigree of genomic data. At '
+                                 + 'least one must be provided')
+            if not set(self.data.iloc[:, self.__get_col__(self.animal_col) - 1]).issubset(set(
+                    self.genomic_data.iloc[:, 0])):
+                raise ValueError('There are animal with records, but no genotypes. In order to perform pure GBLUP, '
+                                 + 'genotypes of all animals records need to be provided.')

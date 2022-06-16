@@ -105,7 +105,10 @@ class Gibbs:
 
                 size_g, size_p, size_r = int(np.sqrt(len(g_list))), int(np.sqrt(len(p_list))), int(np.sqrt(len(r_list)))
                 self.G = np.array(g_list).reshape(size_g, size_g)
-                self.P = np.array(p_list).reshape(size_p, size_p)
+                if p_list:
+                    self.P = np.array(p_list).reshape(size_p, size_p)
+                else:
+                    self.P = None
                 self.R = np.array(r_list).reshape(size_r, size_r)
             else:
                 raise FileNotFoundError('Could not find renf90.par file - you should use Renum class first before '
