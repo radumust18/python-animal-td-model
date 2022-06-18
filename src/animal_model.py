@@ -1,4 +1,5 @@
 import os
+
 import numpy as np
 
 from gibbs import Gibbs
@@ -19,7 +20,7 @@ def add_sol_se():
 class AnimalModel:
     def __init__(self, data, animal_col, fixed_effects, trait_cols, ped=None, inbreeding=False, genomic_data=None,
                  ag_variance=None, res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10,
-                 rounds=5000, burn_in=1000, sampling=10, sampling_print=10, use_blupf90_modules=False):
+                 rounds=10000, burn_in=1000, sampling=10, use_blupf90_modules=False):
         """
         Class used to implement the Animal Model with multiple traits and multiple fixed effects, as well as with
         repeated records or not (which translates into with or without permanent environmental effects)
@@ -44,8 +45,6 @@ class AnimalModel:
         :param burn_in: the number of burn in rounds, used only if estimation_method = 'gibbs'
         :param sampling: the sampling number (if sampling = n, each nth sample will be considered for the final
         estimate), used only if estimation_method = 'gibbs'
-        :param sampling_print: the sampling print number (if sampling_print = n, each nth sample will be printed on the
-        screen), used only if estimation_method = 'gibbs'
         :param use_blupf90_modules: whether or not to use BLUPF90 modules
         """
 
@@ -53,6 +52,9 @@ class AnimalModel:
         self.renum = Renum(data, animal_col, ped, inbreeding=inbreeding, genomic_data=genomic_data,
                            use_blupf90_modules=use_blupf90_modules, trait_cols=trait_cols, fixed_effects=fixed_effects,
                            res_variance=res_variance, ag_variance=ag_variance, pe_variance=pe_variance)
+        self.ped = ped
+        self.data = data
+        self.trait_cols = trait_cols
         self.estimation_method = estimation_method
         self.ag_variance = ag_variance
         self.res_variance = res_variance
@@ -62,7 +64,6 @@ class AnimalModel:
         self.rounds = rounds
         self.burn_in = burn_in
         self.sampling = sampling
-        self.sampling_print = sampling_print
         self.fixed_effects = fixed_effects
         self.inbreeding = inbreeding
         self.FE = []
@@ -72,6 +73,8 @@ class AnimalModel:
         self.RELs = np.zeros((len(trait_cols), self.renum.animal_count))
         self.heritabilities = np.zeros(len(trait_cols))
         self.DRPs = np.zeros((len(trait_cols), self.renum.animal_count))
+        self.DRP_RELs = np.zeros((len(trait_cols), self.renum.animal_count))
+        self.DRP_weights = np.zeros((len(trait_cols), self.renum.animal_count))
 
         if use_blupf90_modules:
             self.__estimate_parameters__()
@@ -81,10 +84,10 @@ class AnimalModel:
             os.system('blupf90+ renf90.par')
             self.__read_blupf90_solutions__()
             self.__read_accuracies__()
-            os.system('deproofsf90 renf90.par')
-            self.__read_deproofsf90_solutions__()
 
         self.__compute_heritabilities__()
+        for i in range(len(trait_cols)):
+            self.__compute_DRPs__(i)
 
     def __estimate_parameters__(self):
         """
@@ -117,8 +120,7 @@ class AnimalModel:
                                             ped=self.renum.new_ped, fixed_effects=self.renum.fixed_effects,
                                             Ainv=self.renum.Ainv, Geninv=self.renum.Ginv, Hinv=self.renum.Hinv,
                                             rounds=self.rounds, burn_in=self.burn_in, sampling=self.sampling,
-                                            sampling_print=self.sampling_print, G_init=self.ag_variance,
-                                            P_init=self.pe_variance, R_init=self.res_variance,
+                                            G_init=self.ag_variance, P_init=self.pe_variance,  R_init=self.res_variance,
                                             use_blupf90_modules=self.use_blupf90_modules)
         elif self.estimation_method is not None:
             raise ValueError('Invalid genetic parameters estimation method')
@@ -266,3 +268,27 @@ class AnimalModel:
                 animal = int(values[2])
                 solution = float(values[3])
                 self.DRPs[trait - 1, animal - 1] = solution
+
+    def __compute_DRPs__(self, trait_idx):
+        """
+        Computes DRPs based on Garrick's article and based on the R implementation that can be found at
+        https://github.com/camult/DRP
+        :return:
+        """
+        r2_gm = (np.where(self.renum.sires > 0, self.RELs[trait_idx - 1, self.renum.sires - 1], 0)
+                 + np.where(self.renum.dams > 0, self.RELs[trait_idx - 1, self.renum.dams - 1], 0)) / 4
+        alfa = 1 / (0.5 - r2_gm)
+        delta = (0.5 - r2_gm) / (1 - self.RELs[trait_idx, :])
+        alfa_delta = (alfa ** 2) + (16 / delta)
+        lambda_star = (1 - self.heritabilities[trait_idx]) / self.heritabilities[trait_idx]
+        Zlgm_Zgm = lambda_star * (0.5 * alfa - 4) + 0.5 * lambda_star * np.sqrt(alfa_delta)
+        Zli_Zi = delta * Zlgm_Zgm + 2 * lambda_star * (2 * delta - 1)
+        r2i = 1 - lambda_star / (Zli_Zi + lambda_star)
+        gm = (np.where(self.renum.sires > 0, self.EBVs[trait_idx - 1, self.renum.sires - 1], 0)
+              + np.where(self.renum.dams > 0, self.EBVs[trait_idx - 1, self.renum.dams - 1], 0)) / 2
+        y1 = -2 * lambda_star * gm + (Zli_Zi + 2 * lambda_star) * self.EBVs[trait_idx, :]
+        DRP = y1 / Zli_Zi
+        wi = (1 - self.heritabilities[trait_idx]) / ((0.5 + (1 - r2i) / r2i) * self.heritabilities[trait_idx])
+        self.DRPs[trait_idx, :] = np.where(wi > 0.0, DRP, 0.0)
+        self.DRP_RELs[trait_idx, :] = np.where(wi > 0.0, r2i, 0.0)
+        self.DRP_weights[trait_idx, :] = np.where(wi > 0.0, wi, 0.0)

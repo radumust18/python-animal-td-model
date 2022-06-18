@@ -20,8 +20,8 @@ def add_sol_se():
 class TestDayModel:
     def __init__(self, data, animal_col, lactation_col, dim_col, fixed_effects, trait_cols, ped=None, inbreeding=False,
                  dim_range=None, fixed_degree=4, random_degree=2, genomic_data=None, ag_variance=None,
-                 res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10, rounds=5000,
-                 burn_in=1000, sampling=10, sampling_print=10, use_blupf90_modules=False):
+                 res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10, rounds=10000,
+                 burn_in=1000, sampling=10, use_blupf90_modules=False):
         """
         Class used to implement the Test-Day Model with multiple traits and multiple fixed effects and variable DIM
         range
@@ -53,8 +53,6 @@ class TestDayModel:
         :param burn_in: the number of burn in rounds, used only if estimation_method = 'gibbs'
         :param sampling: the sampling number (if sampling = n, each nth sample will be considered for the final
         estimate), used only if estimation_method = 'gibbs'
-        :param sampling_print: the sampling print number (if sampling_print = n, each nth sample will be printed on the
-        screen), used only if estimation_method = 'gibbs'
         :param use_blupf90_modules: whether or not to use BLUPF90 modules
         """
 
@@ -73,7 +71,7 @@ class TestDayModel:
         self.rounds = rounds
         self.burn_in = burn_in
         self.sampling = sampling
-        self.sampling_print = sampling_print
+        self.dim_range = dim_range
         self.fixed_degree = fixed_degree
         self.random_degree = random_degree
         self.degree = max(self.fixed_degree, self.random_degree)
@@ -96,6 +94,22 @@ class TestDayModel:
         self.PERMs = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
                                dim_range[1] - dim_range[0] + 1))
         self.heritabilities = np.zeros((len(trait_cols) * self.renum.lactation_dim, dim_range[1] - dim_range[0] + 1))
+        self.var_G = np.zeros((self.renum.lactation_dim, self.number_of_traits, dim_range[1] - dim_range[0] + 1))
+        self.var_P = np.zeros((self.renum.lactation_dim, self.number_of_traits, dim_range[1] - dim_range[0] + 1))
+        self.var_R = np.zeros((self.renum.lactation_dim, self.number_of_traits))
+        self.PEVs = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
+                              dim_range[1] - dim_range[0] + 1))
+        self.RELs = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
+                              dim_range[1] - dim_range[0] + 1))
+        self.PEV_PECs = np.zeros((self.renum.animal_count, (self.random_degree + 1) * self.number_of_traits
+                                  * self.renum.lactation_dim, (self.random_degree + 1) * self.number_of_traits
+                                  * self.renum.lactation_dim))
+        self.DRPs = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
+                              dim_range[1] - dim_range[0] + 1))
+        self.DRP_RELs = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
+                                  dim_range[1] - dim_range[0] + 1))
+        self.DRP_weights = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count,
+                                     dim_range[1] - dim_range[0] + 1))
 
         if use_blupf90_modules:
             self.__estimate_parameters__()
@@ -103,6 +117,7 @@ class TestDayModel:
             add_sol_se()
             os.system('blupf90 renf90.par')
             self.__read_blupf90_solutions__()
+            self.__read_pev_pec__()
 
         self.scaled_dim_range = np.arange(dim_range[0], dim_range[1] + 1)
         self.scaled_dim_range = -1 + 2 * (self.scaled_dim_range - dim_range[0]) / (dim_range[1] - dim_range[0])
@@ -112,16 +127,8 @@ class TestDayModel:
         self.__add_legendre_coefficients__()
         self.__compute_fixed_curve_values__()
         self.__compute_random_curves_values__()
+        self.__compute_pev_and_reliabilities__()
 
-        for i in range(len(trait_cols) * self.renum.lactation_dim):
-            var_a = self.legendre_random_sums\
-                    @ self.variance_estimator.G[i * (random_degree + 1):(i + 1) * random_degree + 1]\
-                    @ self.legendre_random_sums.T
-            var_p = self.legendre_random_sums\
-                    @ self.variance_estimator.P[i * (random_degree + 1):(i + 1) * random_degree + 1]\
-                    @ self.legendre_random_sums.T
-            var_r = np.array([[self.variance_estimator.R[i, i]] * (dim_range[1] - dim_range[0] + 1)])
-            self.heritabilities[i] = var_a / (var_a + var_p + var_r)
 
     def __estimate_parameters__(self):
         """
@@ -157,8 +164,7 @@ class TestDayModel:
                                             ped=self.renum.new_ped, fixed_effects=self.renum.fixed_effects,
                                             Ainv=self.renum.Ainv, Geninv=self.renum.Ginv, Hinv=self.renum.Hinv,
                                             rounds=self.rounds, burn_in=self.burn_in, sampling=self.sampling,
-                                            sampling_print=self.sampling_print, G_init=self.ag_variance,
-                                            P_init=self.pe_variance, R_init=self.res_variance,
+                                            G_init=self.ag_variance, P_init=self.pe_variance, R_init=self.res_variance,
                                             use_blupf90_modules=self.use_blupf90_modules,
                                             fixed_degree=self.fixed_degree, random_degree=self.random_degree)
         elif self.estimation_method is not None:
@@ -293,3 +299,94 @@ class TestDayModel:
                                             @ self.additive_coefficients[i, j, k, :]
                     self.PERMs[i, j, k, :] = self.legendre_partial_sums[
                                              :, range(self.random_degree + 1)] @ self.permanent_coefficients[i, j, k, :]
+
+    def __compute_variances_and_heritabilities__(self):
+        """
+        Computes the genetic parameters from random regression solutions, along with heritabilities for each pair of
+        trait and lactation
+        :return:
+        """
+        for i in range(self.number_of_traits * self.renum.lactation_dim):
+            lactation = i // self.number_of_traits
+            trait = i % self.number_of_traits
+            self.var_G[lactation, trait, :] = self.legendre_random_sums\
+                                              @ self.variance_estimator.G[i * (self.random_degree + 1):
+                                                                          (i + 1) * self.random_degree + 1]\
+                                              @ self.legendre_random_sums.T
+            self.var_P[lactation, trait, :] = self.legendre_random_sums \
+                                              @ self.variance_estimator.P[i * (self.random_degree + 1):
+                                                                          (i + 1) * self.random_degree + 1] \
+                                              @ self.legendre_random_sums.T
+            self.var_R[lactation, trait] = self.variance_estimator.R[i, i]
+            self.heritabilities[i, :] = self.var_G[lactation, trait, :] / (self.var_G[lactation, trait, :]
+                                                                           + self.var_P[lactation, trait, :]
+                                                                           + self.var_R[lactation, trait])
+
+    def __read_pev_pec__(self):
+        """
+        Reads the solutions found in the pev_pec_bf90 file and computes the associated PEC matrices
+        :return: None
+        """
+        with open('pev_pec_bf90') as f:
+            for line in f.readlines():
+                values = line.strip().split()
+                animal = int(values[0]) - 1
+                row = 0
+                col = 0
+                for elem in values[1:]:
+                    self.PEV_PECs[animal, row, col] = float(elem)
+                    if col == row:
+                        col, row = 0, row + 1
+                    else:
+                        col += 1
+                self.PEV_PECs[animal, :, :] += self.PEV_PECs[animal, :, :].T
+                self.PEV_PECs[animal, range(self.PEV_PECs.shape[1]), range(self.PEV_PECs.shape[2])] /= 2
+
+    def __compute_pev_and_reliabilities__(self):
+        """
+        Computes PEVs based on the PEV_PEC matrices and then computes reliabilities based on PEVs
+        :return: None
+        """
+        for i in range(self.renum.lactation_dim * self.number_of_traits):
+            lactation = i // self.number_of_traits
+            trait = i % self.number_of_traits
+            for j in range(self.renum.animal_count):
+                pev_pec_block = self.PEV_PECs[j, i * (self.random_degree + 1):(i + 1) * (self.random_degree + 1),
+                                i * (self.random_degree + 1):(i + 1) * (self.random_degree + 1)]
+                self.PEVs[lactation, trait, j, :] = self.legendre_random_sums @ pev_pec_block\
+                                                    @ self.legendre_random_sums.T
+                if self.renum.inbreeding:
+                    self.RELs[lactation, trait, j, :] = 1 - self.PEVs[lactation, trait, j, :]\
+                                                        / (self.var_G[lactation, trait, :]
+                                                           * (1 + self.renum.inbreeding[j]))
+                else:
+                    self.RELs[lactation, trait, j, :] = 1 - self.PEVs[lactation, trait, j, :]\
+                                                        / self.var_G[lactation, trait, :]
+            for j in range(self.dim_range[1] - self.dim_range[0] + 1):
+                self.__compute_DRPs__(lactation, trait, j)
+
+    def __compute_DRPs__(self, lactation, trait, dim):
+        """
+        Computes DRPs based on Garrick's article and based on the R implementation that can be found at
+        https://github.com/camult/DRP
+        :return:
+        """
+        r2_gm = (np.where(self.renum.sires > 0, self.RELs[lactation, trait, self.renum.sires - 1, dim], 0)
+                 + np.where(self.renum.dams > 0, self.RELs[lactation, trait, self.renum.dams - 1, dim], 0)) / 4
+        alfa = 1 / (0.5 - r2_gm)
+        delta = (0.5 - r2_gm) / (1 - self.RELs[lactation, trait, :, dim])
+        alfa_delta = (alfa ** 2) + (16 / delta)
+        lambda_star = (1 - self.heritabilities[lactation * self.number_of_traits + trait, dim]) / self.heritabilities[
+            lactation * self.number_of_traits + trait, dim]
+        Zlgm_Zgm = lambda_star * (0.5 * alfa - 4) + 0.5 * lambda_star * np.sqrt(alfa_delta)
+        Zli_Zi = delta * Zlgm_Zgm + 2 * lambda_star * (2 * delta - 1)
+        r2i = 1 - lambda_star / (Zli_Zi + lambda_star)
+        gm = (np.where(self.renum.sires > 0, self.EBVs[lactation, trait, self.renum.sires - 1, dim], 0)
+              + np.where(self.renum.dams > 0, self.EBVs[lactation, trait, self.renum.dams - 1, dim], 0)) / 2
+        y1 = -2 * lambda_star * gm + (Zli_Zi + 2 * lambda_star) * self.EBVs[lactation, trait, :, dim]
+        DRP = y1 / Zli_Zi
+        wi = (1 - self.heritabilities[lactation * self.number_of_traits + trait, dim])\
+             / ((0.5 + (1 - r2i) / r2i) * self.heritabilities[lactation * self.number_of_traits + trait, dim])
+        self.DRPs[lactation, trait, :, dim] = np.where(wi > 0.0, DRP, 0.0)
+        self.DRP_RELs[lactation, trait, :, dim] = np.where(wi > 0.0, r2i, 0.0)
+        self.DRP_weights[lactation, trait, :, dim] = np.where(wi > 0.0, wi, 0.0)

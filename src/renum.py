@@ -162,6 +162,8 @@ class Renum:
         self.A22inv = None
         self.animal_to_code = {}
         self.code_to_animal = {}
+        self.sires = None
+        self.dams = None
 
         if use_blupf90_modules:
             # Stores the lines that will be written in the renumf90 file
@@ -242,6 +244,8 @@ class Renum:
                 self.new_ped.iloc[:, 0] = self.ped.iloc[:, 0].map(self.animal_to_code)
 
             remove_save_lines()
+
+            self.__read_inbreeding__()
 
     def __get_col__(self, col):
         """
@@ -587,7 +591,7 @@ class Renum:
                 self.file_lines.extend(['OPTION saveHinv\n', 'OPTION saveA22\n', 'OPTION saveA22Inverse\n'])
             self.file_lines.extend(['OPTION saveG\n', 'OPTION saveGInverse\n', 'OPTION no_quality_control\n'])
             if self.ped is None:
-                self.file_lines.extend(['OPTION tunedG 0\n'])
+                self.file_lines.extend(['OPTION AlphaBeta 0.99 0.01\n', 'OPTION tunedG 0\n'])
             with open('genrenf90.par', 'w') as f:
                 f.writelines(self.file_lines)
             os.system('renumf90 genrenf90.par')
@@ -656,11 +660,15 @@ class Renum:
         with open(ped_file) as f:
             lines = f.readlines()
             self.animal_count = len(lines)
+            self.sires = np.zeros(self.animal_count).astype(int)
+            self.dams = np.zeros(self.animal_count).astype(int)
             for line in lines:
                 values = line.strip().split()
                 self.animal_to_code[values[-1]] = int(values[0])
                 self.code_to_animal[int(values[0])] = values[-1]
                 self.animals.append(values[-1])
+                self.sires[int(values[0]) - 1] = int(values[1])
+                self.dams[int(values[0]) - 1] = int(values[2])
 
     def __add_dummy_snps__(self):
         """
@@ -700,3 +708,16 @@ class Renum:
                     self.genomic_data.iloc[:, 0])):
                 raise ValueError('There are animal with records, but no genotypes. In order to perform pure GBLUP, '
                                  + 'genotypes of all animals records need to be provided.')
+
+    def __read_inbreeding__(self):
+        """
+        If pedigree is provided and inbreeding is set to True, the inbreeding coefficients will be read from the
+        renf90.inb file
+        :return: None
+        """
+        self.inbreeding = np.zeros(self.animal_count)
+        if self.ped is not None and self.inbreeding:
+            with open('renf90.inb') as f:
+                for line in f.readlines():
+                    values = line.strip().split()
+                    self.inbreeding[int(values[-1]) - 1] = float(values[1])

@@ -1,12 +1,14 @@
 import subprocess
 import os
+from time import time
+
 import numpy as np
 
 
 class Gibbs:
     def __init__(self, data=None, animal_col=None, ped=None, fixed_effects=None, LHS=None, RHS=None, Ainv=None,
-                 Geninv=None, Hinv=None, fixed_degree=None, random_degree=None, rounds=5000, burn_in=1000,
-                 sampling=10, sampling_print=10, use_perm=False, G_init=None, R_init=None, P_init=None,
+                 Geninv=None, Hinv=None, fixed_degree=None, random_degree=None, rounds=10000, burn_in=1000,
+                 sampling=10, use_perm=False, G_init=None, R_init=None, P_init=None,
                  use_blupf90_modules=False, ren_file=None, make_blupf90_files=None):
         """
         Class used to implement estimation of genetic (co)variances by means of Gibbs sampling. For now, it only
@@ -31,8 +33,6 @@ class Gibbs:
         :param burn_in: the number of burn in rounds
         :param sampling: the sampling number (if sampling = n, each nth sample will be considered for the final
         estimate)
-        :param sampling_print: the sampling print number (if sampling_print = n, each nth sample will be printed on the
-        screen)
         :param use_perm: boolean parameter which tells us whether or not our model for which we estimate the
         (co)variances makes use of permanent effects or not
         :param G_init: initial estimate of additive genetic variance
@@ -43,6 +43,7 @@ class Gibbs:
         :param make_blupf90_files: boolean parameter, if True, renumf90 type of files would be built based on our
         pedigree, unused yet
         """
+        self.start = time()
         if use_blupf90_modules:
             # First of all, we check the existence of a renf90.par file. If such file does not exist, then renumf90
             # has not been used before, which should have not been the case. Otherwise, we check that the given REML
@@ -70,14 +71,12 @@ class Gibbs:
                     raise ValueError('burn_in parameter should be a positive integer')
                 if type(sampling) != int or sampling <= 0:
                     raise ValueError('sampling parameter should be a positive integer')
-                if type(sampling_print) != int or sampling_print <= 0:
-                    raise ValueError('sampling_print parameter should be a positive integer')
                 if rounds <= burn_in:
                     raise ValueError('rounds value should be higher than burn_in value')
                 if burn_in + sampling > rounds:
                     raise ValueError('Not enough rounds to get sample based on burn_in and sampling parameters')
-                process = subprocess.Popen(['gibbs2f90', 'renf90.par', '--rounds', str(rounds), '--burnin',
-                                            str(burn_in), '--thin', str(sampling), '--thinprint', str(sampling_print)],
+                process = subprocess.Popen(['gibbsf90+', 'renf90.par', '--rounds', str(rounds), '--burnin',
+                                            str(burn_in), '--interval', str(sampling)],
                                            stdout=subprocess.PIPE)
 
                 g_read, p_read, r_read = False, False, False
@@ -113,3 +112,4 @@ class Gibbs:
             else:
                 raise FileNotFoundError('Could not find renf90.par file - you should use Renum class first before '
                                         + 'Gibbs class')
+        self.duration = time() - self.start
