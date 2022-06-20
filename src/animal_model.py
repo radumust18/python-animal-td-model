@@ -72,6 +72,7 @@ class AnimalModel:
         self.PEVs = np.zeros((len(trait_cols), self.renum.animal_count))
         self.RELs = np.zeros((len(trait_cols), self.renum.animal_count))
         self.heritabilities = np.zeros(len(trait_cols))
+        self.repeatabilities = np.zeros(len(trait_cols))
         self.DRPs = np.zeros((len(trait_cols), self.renum.animal_count))
         self.DRP_RELs = np.zeros((len(trait_cols), self.renum.animal_count))
         self.DRP_weights = np.zeros((len(trait_cols), self.renum.animal_count))
@@ -246,13 +247,17 @@ class AnimalModel:
         each trait. The phenotypic variance will be computed by adding the additive variance and residual variance and
         also the permanent one if permanent effects are considered. Heritabilities are then computed by simply dividing
         each element in the main diagonal of the additive variance matrix to each element in the main diagonal of the
-        sum of variance matrices
+        sum of variance matrices. Repeatabilities are also computed, although if there are no permanent effects
+        considered, they will be equal to heritabilities
         :return: None
         """
         variance_sum = self.G + self.R
+        repeat_sum = self.G
         if self.P is not None:
             variance_sum += self.P
+            repeat_sum += self.P
         self.heritabilities = self.G.diagonal() / variance_sum.diagonal()
+        self.repeatabilities = repeat_sum.diagonal() / variance_sum.diagonal()
 
     def __read_deproofsf90_solutions__(self):
         """

@@ -199,7 +199,7 @@ class Renum:
             self.__add_variances__()
             self.__add_size_constraint__()
 
-            self.new_data.to_csv('pheno.txt', sep=' ', header=False, index=False)
+            self.new_data.astype(str).replace('0.0', '0').to_csv('pheno.txt', sep=' ', header=False, index=False)
 
             # We will compute A using preGSf90. The approach will be to actually compute an A22 matrix which will be
             # made by all the animals. In order to do this, we need to know which animals will be kept by renumbering,
@@ -287,8 +287,8 @@ class Renum:
 
     def __check_dim_col__(self):
         """
-        If DIM col exists, it is ensured that it only has positive integer values and that the interval given by the
-        range includes all the values found in the DIM column
+        If DIM col exists, it is ensured that it only has positive integer values. It is also checked that the DIM range
+        is valid (as in the first element is smaller than the second one)
         :return: None
         """
         if self.dim_col is not None:
@@ -297,16 +297,12 @@ class Renum:
                 raise ValueError("DIM column should only have integer values")
             data_col = self.data.iloc[:, mod_col - 1]
             if data_col.min() <= 0:
-                raise ValueError("Lactation column values should be higher than 0")
+                raise ValueError("DIM column values should be higher than 0")
             if self.dim_range is None:
                 self.dim_range = (data_col.min(), data_col.max())
             else:
                 if self.dim_range[0] > self.dim_range[1]:
                     raise ValueError("DIM range should have the first element smaller than the second one")
-                elif self.dim_range[0] > data_col.min():
-                    raise ValueError("DIM range minimum is larger than some values in the DIM column")
-                elif self.dim_range[1] < data_col.max():
-                    raise ValueError("DIM range maximum is smaller than some values in the DIM column")
 
     def __add_traits_line__(self):
         """
@@ -349,7 +345,8 @@ class Renum:
                 # one fixed effect
                 all_cols = [self.__get_col__(effect_col) - 1 for effect_col in effect[0]]
                 self.new_data[count] = self.data.iloc[:, all_cols].astype(str).apply('_'.join, axis=1)
-                self.file_lines.extend((['EFFECT\n', (str(count) + ' ') * self.traits_count + 'cross alpha\n']))
+                self.file_lines.extend((['EFFECT\n', (str(count) + ' ') * self.traits_count * self.lactation_dim
+                                         + 'cross alpha\n']))
             if len(effect) == 2:
                 # If len is 2, we can either have a list of effects to be concatenated, each effect being nested, or
                 # one effect, given by the column and its category
@@ -376,7 +373,8 @@ class Renum:
                         tmp_data[0] = self.data.iloc[:, all_cols].astype(str).apply('_'.join, axis=1)
                         tmp_data[1] = self.data.iloc[:, self.__get_col__(effect[1]) - 1]
                     self.new_data[count] = tmp_data.apply('_'.join, axis=1)
-                    self.file_lines.extend((['EFFECT\n', (str(count) + ' ') * self.traits_count + 'cross alpha\n']))
+                    self.file_lines.extend((['EFFECT\n', (str(count) + ' ') * self.traits_count * self.lactation_dim
+                                             + 'cross alpha\n']))
                 else:
                     # For the case when the first element is not an Iterable, we must have a normal fixed effect given
                     # by column and category. We check that the category is valid and we also perform additional checks
@@ -385,13 +383,15 @@ class Renum:
                     check_cat(col, cat)
                     mod_col = self.__get_col__(col)
                     if is_numeric_dtype(self.data.iloc[:, mod_col - 1]):
-                        self.file_lines.extend((['EFFECT\n', (str(count) + ' ') * self.traits_count + cat
-                                                 + (' numer' if cat == 'cross' else '') + '\n']))
+                        self.file_lines.extend((['EFFECT\n', (str(count) + ' ') * self.traits_count
+                                                 * self.lactation_dim + cat + (' numer' if cat == 'cross' else '')
+                                                 + '\n']))
                     else:
                         if cat == 'cov':
                             raise ValueError('Covariate effect', col, 'has non-numeric values')
                         self.file_lines.extend(
-                            ['EFFECT\n', (str(count) + ' ') * self.traits_count + cat + ' alpha\n'])
+                            ['EFFECT\n', (str(count) + ' ') * self.traits_count * self.lactation_dim + cat
+                             + ' alpha\n'])
                     self.new_data[count] = self.data.iloc[:, mod_col - 1]
             elif len(effect) == 4:
                 # If len is 4, then we have a column of a certain category nested by another column of certain category.
@@ -408,16 +408,17 @@ class Renum:
                 if cat == 'cross':
                     self.new_data[count] = self.data.iloc[:, [mod_col - 1, mod_nested - 1]].astype(str).apply('_'.join,
                                                                                                               axis=1)
-                    self.file_lines.extend(['EFFECT\n', (str(count) + ' ') * self.traits_count + 'cross alpha\n'])
+                    self.file_lines.extend(['EFFECT\n', (str(count) + ' ') * self.traits_count * self.lactation_dim
+                                            + 'cross alpha\n'])
                 else:
                     if not is_numeric_dtype(self.data.iloc[:, mod_col - 1]):
                         raise ValueError('Covariate effect', col, 'has non-numeric values')
                     if nested_cat == 'cov' and not is_numeric_dtype(self.data.iloc[:, mod_nested - 1]):
                         raise ValueError('Covariate nested effect', nested, 'has non-numeric values')
-                    self.file_lines.extend(['EFFECT\n', (str(count) + ' ') * self.traits_count + cat
-                                            + (' numer\n' if cat == 'cross' else ' \n'), 'NESTED\n',
+                    self.file_lines.extend(['EFFECT\n', (str(count) + ' ') * self.traits_count * self.lactation_dim
+                                            + cat + (' numer\n' if cat == 'cross' else ' \n'), 'NESTED\n',
                                             (str(self.fixed_count + self.degree + 1 + nested_count) + ' ')
-                                            * self.traits_count + ' ' + nested_cat
+                                            * self.traits_count * self.lactation_dim + ' ' + nested_cat
                                             + (' \n' if nested_cat == 'cov' else 'numer\n'
                                             if is_numeric_dtype(self.data.iloc[:, mod_nested - 1]) else ' alpha\n')])
                     self.new_data[count] = self.data.iloc[:, mod_col - 1]
@@ -432,13 +433,13 @@ class Renum:
     def __add_legendre_polynomials__(self):
         if self.degree >= 0:
             dim_values = self.data.iloc[:, self.__get_col__(self.dim_col) - 1]
-            scaled_dim_col = -1 + 2 * (dim_values - self.dim_range[0]) / (self.dim_range[1] - self.dim_range[0])
+            scaled_dim_col = -1 + 2 * (dim_values - dim_values.min()) / (dim_values.max() - dim_values.min())
             for i in range(self.degree + 1):
                 self.new_data[self.fixed_count + i + 1] = legendre(i)(scaled_dim_col) * np.sqrt(i + 0.5)
                 if i <= self.fixed_degree:
                     # Legendre fixed coefficients have their indices right after the fixed effects
                     self.file_lines.extend(['EFFECT\n', (str(self.fixed_count + i + 1) + ' ') * self.traits_count
-                                            + 'cov\n'])
+                                            * self.lactation_dim + 'cov\n'])
 
     def __add_traits_to_renumf90_pheno__(self):
         """
@@ -468,8 +469,8 @@ class Renum:
         """
         col_idx = self.fixed_count + self.degree + 1 + self.nested_count + self.traits_count * self.lactation_dim + 1
         self.new_data[col_idx] = self.data.iloc[:, self.animal_col - 1]
-        self.file_lines.extend(['EFFECT\n', (str(col_idx) + ' ') * self.traits_count + 'cross alpha\n', 'RANDOM\n',
-                                'animal\n'])
+        self.file_lines.extend(['EFFECT\n', (str(col_idx) + ' ') * self.traits_count * self.lactation_dim
+                                + 'cross alpha\n', 'RANDOM\n', 'animal\n'])
 
     def __add_perm_effect__(self):
         """
@@ -567,8 +568,13 @@ class Renum:
                 self.file_lines.extend([' '.join(map(str, row)) + '\n' for row in self.pe_variance])
 
     def __add_size_constraint__(self):
-        # Subject to change, may not be enough in some cases
-        self.file_lines.append('OPTION alpha_size 30\n')
+        """
+        Adds a constraint of how long an alphanumeric element in the given data can be. As the RENUMF90 default is 20
+        and this sometimes may not be enough, we need to add one manually
+        :return:
+        """
+        max_size = self.new_data.astype(str).agg([len]).max().max()
+        self.file_lines.append('OPTION alpha_size ' + str((max_size // 10 + 1) * 10) + '\n')
 
     def __add_pev_pec__(self):
         """
@@ -715,9 +721,9 @@ class Renum:
         renf90.inb file
         :return: None
         """
-        self.inbreeding = np.zeros(self.animal_count)
+        self.inbreeding_coefficients = np.zeros(self.animal_count)
         if self.ped is not None and self.inbreeding:
             with open('renf90.inb') as f:
                 for line in f.readlines():
                     values = line.strip().split()
-                    self.inbreeding[int(values[-1]) - 1] = float(values[1])
+                    self.inbreeding_coefficients[int(values[-1]) - 1] = float(values[1])
