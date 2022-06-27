@@ -10,8 +10,10 @@ from renum import Renum
 class TestDayModel:
     def __init__(self, data, animal_col, lactation_col, dim_col, fixed_effects, trait_cols, ped=None, inbreeding=False,
                  dim_range=None, fixed_degree=4, random_degree=2, genomic_data=None, ag_variance=None,
-                 res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10, rounds=10000,
-                 burn_in=1000, sampling=10, use_blupf90_modules=False):
+                 res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10, reml_maxrounds=None,
+                 reml_conv=None, rounds=10000, burn_in=1000, sampling=10, use_blupf90_modules=False, export_A=False,
+                 export_Ainv=False, export_G=False, export_Ginv=False, export_Hinv=False, export_A22=False,
+                 export_A22inv=False):
         """
         Class used to implement the Test-Day Model with multiple traits and multiple fixed effects and variable DIM
         range
@@ -39,6 +41,10 @@ class TestDayModel:
         :param pe_variance: initial permanent genetic variance, if it exists
         :param estimation_method: can be any of 'em-reml', 'ai-reml', 'ai-em-reml' or 'gibbs'
         :param em_steps: number of initial EM-REML steps (used only if estimation_method='ai-em-reml')
+        :param reml_maxrounds: option to set a maximum number of rounds for REML analysis. It applies only if
+        estimation_method is 'em-reml', 'ai-reml' or 'ai-em-reml'
+        :param reml_conv: option to set a convergence limit for REML analysis. It applies only if
+        estimation_method is 'em-reml', 'ai-reml' or 'ai-em-reml'
         :param rounds: the number of total rounds of Gibbs sampling, used only if estimation_method = 'gibbs'
         :param burn_in: the number of burn in rounds, used only if estimation_method = 'gibbs'
         :param sampling: the sampling number (if sampling = n, each nth sample will be considered for the final
@@ -58,6 +64,8 @@ class TestDayModel:
         self.pe_variance = pe_variance
         self.use_blupf90_modules = use_blupf90_modules
         self.em_steps = em_steps
+        self.reml_maxrounds = reml_maxrounds
+        self.reml_conv = reml_conv
         self.rounds = rounds
         self.burn_in = burn_in
         self.sampling = sampling
@@ -110,6 +118,7 @@ class TestDayModel:
         if use_blupf90_modules:
             self.__estimate_parameters__()
             self.__add_updated_genetic_parameters__()
+            self.__add_pev_pec__()
             os.system('blupf90 renf90.par')
             self.__read_blupf90_solutions__()
             self.__read_pev_pec__()
@@ -143,14 +152,16 @@ class TestDayModel:
                                            Ainv=self.renum.Ainv, Geninv=self.renum.Ginv, Hinv=self.renum.Hinv,
                                            method='em', G_init=self.ag_variance, P_init=self.pe_variance,
                                            R_init=self.res_variance, use_blupf90_modules=self.use_blupf90_modules,
-                                           fixed_degree=self.fixed_degree, random_degree=self.random_degree)
+                                           fixed_degree=self.fixed_degree, random_degree=self.random_degree,
+                                           maxrounds=self.reml_maxrounds, conv=self.reml_conv)
         elif self.estimation_method == 'ai-reml':
             self.variance_estimator = REML(data=self.renum.new_data, animal_col=self.renum.animal_col,
                                            ped=self.renum.new_ped, fixed_effects=self.renum.fixed_effects,
                                            Ainv=self.renum.Ainv, Geninv=self.renum.Ginv, Hinv=self.renum.Hinv,
                                            method='ai', G_init=self.ag_variance, P_init=self.pe_variance,
                                            R_init=self.res_variance, use_blupf90_modules=self.use_blupf90_modules,
-                                           fixed_degree=self.fixed_degree, random_degree=self.random_degree)
+                                           fixed_degree=self.fixed_degree, random_degree=self.random_degree,
+                                           maxrounds=self.reml_maxrounds, conv=self.reml_conv)
         elif self.estimation_method == 'ai-em-reml':
             self.variance_estimator = REML(data=self.renum.new_data, animal_col=self.renum.animal_col,
                                            ped=self.renum.new_ped, fixed_effects=self.renum.fixed_effects,
@@ -158,7 +169,8 @@ class TestDayModel:
                                            method='ai-em', em_steps=self.em_steps, G_init=self.ag_variance,
                                            P_init=self.pe_variance, R_init=self.res_variance,
                                            use_blupf90_modules=self.use_blupf90_modules, fixed_degree=self.fixed_degree,
-                                           random_degree=self.random_degree)
+                                           random_degree=self.random_degree, maxrounds=self.reml_maxrounds,
+                                           conv=self.reml_conv)
         elif self.estimation_method == 'gibbs':
             self.variance_estimator = Gibbs(data=self.renum.new_data, animal_col=self.renum.animal_col,
                                             ped=self.renum.new_ped, fixed_effects=self.renum.fixed_effects,
@@ -196,7 +208,8 @@ class TestDayModel:
         read_residual, read_additive, read_permanent = False, False, False
         residual_line, additive_line, permanent_line = 0, 0, 0
         with open('renf90.par') as f:
-            for line in f.readlines():
+            line = f.readline()
+            while line:
                 if 'RANDOM_RESIDUAL VALUES' in line:
                     read_residual = True
                     file_lines.append(line)
@@ -211,18 +224,25 @@ class TestDayModel:
                     residual_line += 1
                     if residual_line >= self.R.shape[0]:
                         read_residual = False
+                        for _ in range(((self.R.shape[0] - 1) // 7) * self.R.shape[0]):
+                            line = f.readline()
                 elif read_additive:
                     file_lines.append(' '.join(map(str, self.G[additive_line])) + '\n')
                     additive_line += 1
                     if additive_line >= self.G.shape[0]:
                         read_additive = False
+                        for _ in range(((self.G.shape[0] - 1) // 7) * self.G.shape[0]):
+                            line = f.readline()
                 elif read_permanent:
                     file_lines.append(' '.join(map(str, self.P[permanent_line])) + '\n')
                     permanent_line += 1
                     if permanent_line >= self.P.shape[0]:
                         read_permanent = False
+                        for _ in range(((self.P.shape[0] - 1) // 7) * self.P.shape[0]):
+                            line = f.readline()
                 else:
                     file_lines.append(line)
+                line = f.readline()
         with open('renf90.par', 'w') as f:
             f.writelines(file_lines)
 
@@ -396,3 +416,12 @@ class TestDayModel:
         self.DRPs[lactation, trait, :] = np.where(wi > 0.0, DRP, 0.0)
         self.DRP_RELs[lactation, trait, :] = np.where(wi > 0.0, r2i, 0.0)
         self.DRP_weights[lactation, trait, :] = np.where(wi > 0.0, wi, 0.0)
+
+    def __add_pev_pec__(self):
+        """
+        The random regression is ordered so that it follows after the fixed effects, the fixed Legendre polynomials
+        effects and the animal effect, which explains the value used in the write function
+        :return: None
+        """
+        with open('renf90.par', 'a') as f:
+            f.write('OPTION store_pev_pec ' + str(len(self.fixed_effects) + self.fixed_degree + 2) + '\n')

@@ -77,7 +77,8 @@ class Renum:
     def __init__(self, data, animal_col, ped, inbreeding=False, genomic_data=None, use_blupf90_modules=False,
                  make_blupf90_files=False, trait_cols=None, fixed_effects=None, fixed_degree=None, random_degree=None,
                  lactation_col=None, dim_col=None, dim_range=None, res_variance=None, ag_variance=None,
-                 pe_variance=None, export_A=False, export_G=False, export_A22=False):
+                 pe_variance=None, export_A=False, export_Ainv=False, export_G=False, export_Ginv=False,
+                 export_Hinv=False, export_A22=False, export_A22inv=False):
         """
         Class used to implement the renumbering and reordering of pedigree. For now, it only supports a renumf90
         wrapper
@@ -106,9 +107,13 @@ class Renum:
         :param res_variance: initial residual variance, if it exists
         :param ag_variance: initial additive genetic variance, if it exists
         :param pe_variance: initial permanent genetic variance, if it exists
-        :param export_A: unused yet, determines whether A matrix should be saved or not
-        :param export_G: unused yet, determines whether G matrix should be saved or not
-        :param export_A22: unused yet, determines whether A22 matrix should be saved or not
+        :param export_A: unused yet, determines whether the A matrix should be saved or not
+        :param export_Ainv: unused yet, determines whether the inverse of the A matrix should be saved or not
+        :param export_G: unused yet, determines whether the G matrix should be saved or not
+        :param export_Ginv: unused yet, determines whether the inverse of the G matrix should be saved or not
+        :param export_Hinv: unused yet, determines whether the inverse of the H matrix should be saved or not
+        :param export_A22: unused yet, determines whether the A22 matrix should be saved or not
+        :param export_A22inv: unused yet, determines whether the inverse of the A22 matrix should be saved or not
         """
         self.data = data
         self.trait_cols = trait_cols
@@ -225,11 +230,8 @@ class Renum:
                 self.__save_Ainv__()
 
             # Finally, we add actual genomic data in the renumf90 files if data is available and then we run the final
-            # iteration of renumf90. We also make sure to only add pev-pec options if we have random regression
-            # coefficients, which would be equivalent to the random Legendre degree to be at least equal to 0
+            # iteration of renumf90.
             self.__add_genomic__()
-            if self.random_degree >= 0:
-                self.__add_pev_pec__()
             with open('genrenf90.par', 'w') as f:
                 f.writelines(self.file_lines)
             if self.genomic_data is None:
@@ -240,7 +242,7 @@ class Renum:
                 self.__add_animal_codes__()
 
             if self.ped is not None:
-                self.new_ped = self.ped.copy()
+                self.new_ped = self.ped.copy()[self.ped.iloc[:, 0].isin(self.animal_to_code)]
                 self.new_ped.iloc[:, 0] = self.ped.iloc[:, 0].map(self.animal_to_code)
 
             remove_save_lines()
@@ -349,8 +351,9 @@ class Renum:
                                          + 'cross alpha\n']))
             if len(effect) == 2:
                 # If len is 2, we can either have a list of effects to be concatenated, each effect being nested, or
-                # one effect, given by the column and its category
-                if hasattr(effect[0], '__iter__'):
+                # one effect, given by the column and its category. However, we need to check that this is not a string,
+                # as that can also be an Iterable
+                if hasattr(effect[0], '__iter__') and type(effect[0]) != str:
                     # If the first element is an Iterable, then we should also check that the second element is an
                     # Iterable and if it is, we should also make sure that it has the same length with the first
                     # element. If these conditions are met, then all columns, main and nested, are converted into one
@@ -575,14 +578,6 @@ class Renum:
         """
         max_size = self.new_data.astype(str).agg([len]).max().max()
         self.file_lines.append('OPTION alpha_size ' + str((max_size // 10 + 1) * 10) + '\n')
-
-    def __add_pev_pec__(self):
-        """
-        The random regression is ordered so that it follows after the fixed effects, the fixed Legendre polynomials
-        effects and the animal effect, which explains the value used in the append function
-        :return: None
-        """
-        self.file_lines.append('OPTION store_pev_pec ' + str(self.fixed_count + self.fixed_degree + 2) + '\n')
 
     def __add_genomic__(self):
         """

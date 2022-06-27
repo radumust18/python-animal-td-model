@@ -8,7 +8,7 @@ class REML:
     def __init__(self, data=None, animal_col=None, ped=None, fixed_effects=None, LHS=None, RHS=None, Ainv=None,
                  Geninv=None, Hinv=None, fixed_degree=None, random_degree=None, method='em', em_steps=10,
                  use_perm=False, G_init=None, R_init=None, P_init=None, use_blupf90_modules=False, ren_file=None,
-                 make_blupf90_files=None):
+                 make_blupf90_files=None, maxrounds=None, conv=None):
         """
         Class used to implement estimation of genetic (co)variances by means of various REML methods. For now, it only
         supports a combination of remlf90 and airemlf90 wrappers.
@@ -40,6 +40,8 @@ class REML:
         :param ren_file: a renaddXX.ped type of file, unused yet
         :param make_blupf90_files: boolean parameter, if True, renumf90 type of files would be built based on our
         pedigree, unused yet
+        :param maxrounds: option to set a maximum number of rounds for REML analysis. If None, then default applies
+        :param conv: convergente limit for analysis. If None, then default applies
         """
         self.start = time()
         if use_blupf90_modules:
@@ -57,7 +59,19 @@ class REML:
             # until we meet a line which does not contain only numerical values. That is when we will know that we had
             # read all the values of the residual variance(s). Finally, the matrices are saved in the G, P and R fields,
             # respectively, as numpy 2D arrays.
+            # We also check at the very beginning after for a maxrounds option in case renf90.par exists. If maxrounds
+            # is not None, we add the option in the renf90.par and delete after REML analysis is finished.
             if os.path.exists('renf90.par'):
+                if maxrounds is not None:
+                    if type(maxrounds) != int or maxrounds <= 0:
+                        raise ValueError('maxrounds should be a positive integer')
+                    with open('renf90.par', 'a') as f:
+                        f.write('OPTION maxrounds ' + str(maxrounds) + '\n')
+                if conv is not None:
+                    if (type(conv) != int and type(conv) != float) or conv <= 0:
+                        raise ValueError('conv should be a positive number')
+                    with open('renf90.par', 'a') as f:
+                        f.write('OPTION conv_crit ' + str(conv) + '\n')
                 if method == 'em':
                     os.system('remlf90 renf90.par')
                 elif method == 'ai':
@@ -71,6 +85,20 @@ class REML:
                 else:
                     raise ValueError('Invalid type of REML specified: can be either \'em\' for EM-REML \'ai\' for '
                                      + 'AI-REML or \'ai-em\' for AI-REML with initial EM-REML steps')
+
+                if maxrounds is not None:
+                    with open('renf90.par') as f:
+                        lines = f.readlines()
+                    filtered_lines = list(filter(lambda x: 'OPTION maxrounds ' not in x, lines))
+                    with open('renf90.par', 'w') as f:
+                        f.writelines(filtered_lines)
+
+                if conv is not None:
+                    with open('renf90.par') as f:
+                        lines = f.readlines()
+                    filtered_lines = list(filter(lambda x: 'OPTION conv_crit ' not in x, lines))
+                    with open('renf90.par', 'w') as f:
+                        f.writelines(filtered_lines)
 
                 file = 'airemlf90.log' if 'ai' in method else 'remlf90.log'
                 with open(file) as f:
