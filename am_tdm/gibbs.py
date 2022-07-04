@@ -9,7 +9,7 @@ class Gibbs:
     def __init__(self, data=None, animal_col=None, ped=None, fixed_effects=None, LHS=None, RHS=None, Ainv=None,
                  Geninv=None, Hinv=None, fixed_degree=None, random_degree=None, rounds=10000, burn_in=1000,
                  sampling=10, use_perm=False, G_init=None, R_init=None, P_init=None,
-                 use_blupf90_modules=False, ren_file=None, make_blupf90_files=None):
+                 use_blupf90_modules=True, ren_file=None, make_blupf90_files=None):
         """
         Class used to implement estimation of genetic (co)variances by means of Gibbs sampling. For now, it only
         supports a gibbs2f90 wrapper.

@@ -7,7 +7,7 @@ import numpy as np
 class REML:
     def __init__(self, data=None, animal_col=None, ped=None, fixed_effects=None, LHS=None, RHS=None, Ainv=None,
                  Geninv=None, Hinv=None, fixed_degree=None, random_degree=None, method='em', em_steps=10,
-                 use_perm=False, G_init=None, R_init=None, P_init=None, use_blupf90_modules=False, ren_file=None,
+                 use_perm=False, G_init=None, R_init=None, P_init=None, use_blupf90_modules=True, ren_file=None,
                  make_blupf90_files=None, maxrounds=None, conv=None):
         """
         Class used to implement estimation of genetic (co)variances by means of various REML methods. For now, it only

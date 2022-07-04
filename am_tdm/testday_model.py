@@ -2,16 +2,16 @@ import os
 import numpy as np
 from scipy.special import legendre
 
-from gibbs import Gibbs
-from reml import REML
-from renum import Renum
+from am_tdm.gibbs import Gibbs
+from am_tdm.reml import REML
+from am_tdm.renum import Renum
 
 
 class TestDayModel:
     def __init__(self, data, animal_col, lactation_col, dim_col, fixed_effects, trait_cols, ped=None, inbreeding=False,
-                 dim_range=None, fixed_degree=4, random_degree=2, genomic_data=None, ag_variance=None,
+                 dim_range=(5, 310), fixed_degree=4, random_degree=2, genomic_data=None, ag_variance=None,
                  res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10, reml_maxrounds=None,
-                 reml_conv=None, rounds=10000, burn_in=1000, sampling=10, use_blupf90_modules=False, export_A=False,
+                 reml_conv=None, rounds=10000, burn_in=1000, sampling=10, use_blupf90_modules=True, export_A=False,
                  export_Ainv=False, export_G=False, export_Ginv=False, export_Hinv=False, export_A22=False,
                  export_A22inv=False):
         """
@@ -332,12 +332,12 @@ class TestDayModel:
             min_idx = i * (self.random_degree + 1)
             max_idx = (i + 1) * (self.random_degree + 1)
             self.var_G[lactation, trait, :] = (self.legendre_random_coefficients
-                                               @ self.variance_estimator.G[min_idx:max_idx, min_idx:max_idx]
+                                               @ self.G[min_idx:max_idx, min_idx:max_idx]
                                                @ self.legendre_random_coefficients.T).diagonal()
             self.var_P[lactation, trait, :] = (self.legendre_random_coefficients
-                                               @ self.variance_estimator.P[min_idx:max_idx, min_idx:max_idx]
+                                               @ self.P[min_idx:max_idx, min_idx:max_idx]
                                                @ self.legendre_random_coefficients.T).diagonal()
-            self.var_R[lactation, trait] = self.variance_estimator.R[i, i]
+            self.var_R[lactation, trait] = self.R[i, i]
             repeat_variance = self.var_G[lactation, trait, :] + self.var_P[lactation, trait, :]
             pheno_variance = repeat_variance + self.var_R[lactation, trait]
             self.heritabilities[lactation, trait, :] = self.var_G[lactation, trait, :] / pheno_variance

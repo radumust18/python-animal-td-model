@@ -2,9 +2,9 @@ import os
 
 import numpy as np
 
-from gibbs import Gibbs
-from reml import REML
-from renum import Renum
+from am_tdm.gibbs import Gibbs
+from am_tdm.reml import REML
+from am_tdm.renum import Renum
 
 
 def add_sol_se():
@@ -21,7 +21,7 @@ class AnimalModel:
     def __init__(self, data, animal_col, fixed_effects, trait_cols, ped=None, inbreeding=False, genomic_data=None,
                  ag_variance=None, res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10,
                  reml_maxrounds=None, reml_conv=None, rounds=10000, burn_in=1000, sampling=10,
-                 use_blupf90_modules=False, export_A=False, export_Ainv=False, export_G=False, export_Ginv=False,
+                 use_blupf90_modules=True, export_A=False, export_Ainv=False, export_G=False, export_Ginv=False,
                  export_Hinv=False, export_A22=False, export_A22inv=False):
         """
         Class used to implement the Animal Model with multiple traits and multiple fixed effects, as well as with

@@ -74,7 +74,7 @@ def remove_save_lines():
 
 
 class Renum:
-    def __init__(self, data, animal_col, ped, inbreeding=False, genomic_data=None, use_blupf90_modules=False,
+    def __init__(self, data, animal_col, ped, inbreeding=False, genomic_data=None, use_blupf90_modules=True,
                  make_blupf90_files=False, trait_cols=None, fixed_effects=None, fixed_degree=None, random_degree=None,
                  lactation_col=None, dim_col=None, dim_range=None, res_variance=None, ag_variance=None,
                  pe_variance=None, export_A=False, export_Ainv=False, export_G=False, export_Ginv=False,
@@ -590,7 +590,8 @@ class Renum:
             self.file_lines.append('OPTION saveAscii\n')
             if self.ped is not None:
                 self.file_lines.extend(['OPTION saveHinv\n', 'OPTION saveA22\n', 'OPTION saveA22Inverse\n'])
-            self.file_lines.extend(['OPTION saveG\n', 'OPTION saveGInverse\n', 'OPTION no_quality_control\n'])
+            self.file_lines.extend(['OPTION saveG\n', 'OPTION saveGInverse\n', 'OPTION thrStopCorAG 0.0\n',
+                                    'OPTION no_quality_control\n'])
             if self.ped is None:
                 self.file_lines.extend(['OPTION AlphaBeta 0.99 0.01\n', 'OPTION tunedG 0\n'])
             with open('genrenf90.par', 'w') as f:
