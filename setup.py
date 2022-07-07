@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name='am-tdm',
+    name='am_tdm',
     version='0.1.0',
     description='Python wrappers for the Animal Model and the Test-Day Model using the BLUPF90 suite of programs. '
                 'Supports pedigree renumbering and variance components estimation using REML and Gibbs sampling. '
@@ -11,7 +11,7 @@ setup(
     author='Radu-Ioan Mustatea',
     author_email='radu.mustatea18@gmail.com',
     license='MIT License',
-    packages=['am-tdm'],
+    packages=['am_tdm'],
     install_requires=['numpy', 'scipy', 'pandas'],
     classifiers=[
         'Development Status :: 1 - Planning',
