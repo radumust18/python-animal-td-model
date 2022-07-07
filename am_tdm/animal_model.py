@@ -57,7 +57,10 @@ class AnimalModel:
         # Firstly, the pedigree is renumbered and reordered
         self.renum = Renum(data, animal_col, ped, inbreeding=inbreeding, genomic_data=genomic_data,
                            use_blupf90_modules=use_blupf90_modules, trait_cols=trait_cols, fixed_effects=fixed_effects,
-                           res_variance=res_variance, ag_variance=ag_variance, pe_variance=pe_variance)
+                           res_variance=res_variance, ag_variance=ag_variance, pe_variance=pe_variance,
+                           export_A=export_A, export_Ainv=export_Ainv, export_A22=export_A22,
+                           export_A22inv=export_A22inv, export_G=export_G, export_Ginv=export_Ginv,
+                           export_Hinv=export_Hinv)
         self.estimation_method = estimation_method
         self.ag_variance = ag_variance
         self.res_variance = res_variance

@@ -57,7 +57,9 @@ class TestDayModel:
                            use_blupf90_modules=use_blupf90_modules, trait_cols=trait_cols, fixed_effects=fixed_effects,
                            res_variance=res_variance, ag_variance=ag_variance, pe_variance=pe_variance,
                            lactation_col=lactation_col, dim_col=dim_col, dim_range=dim_range, fixed_degree=fixed_degree,
-                           random_degree=random_degree)
+                           random_degree=random_degree, export_A=export_A, export_Ainv=export_Ainv,
+                           export_A22=export_A22, export_A22inv=export_A22inv, export_G=export_G,
+                           export_Ginv=export_Ginv, export_Hinv=export_Hinv)
         self.estimation_method = estimation_method
         self.ag_variance = ag_variance
         self.res_variance = res_variance

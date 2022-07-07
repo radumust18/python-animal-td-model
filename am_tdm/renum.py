@@ -169,6 +169,15 @@ class Renum:
         self.code_to_animal = {}
         self.sires = None
         self.dams = None
+        self.export_A = export_A
+        self.export_Ainv = export_Ainv
+        self.export_A22 = export_A22
+        self.export_A22inv = export_A22inv
+        self.export_G = export_G
+        self.export_Ginv = export_Ginv
+        self.export_Hinv = export_Hinv
+        self.export_genomic = (self.export_A22 or self.export_A22inv or self.export_G or self.export_Ginv
+                               or self.export_Hinv)
 
         if use_blupf90_modules:
             # Stores the lines that will be written in the renumf90 file
@@ -211,12 +220,16 @@ class Renum:
             # in order to have consistent results. Thus, we will run renumf90 once and use the renaddXX.ped file to
             # determine which animals are part of the renumbered pedigree. Then, we will build a dummy renumf90 file
             # using dummy SNPs for each animal in the pedigree and running preGSf90 will compute the A matrix
-            if ped is not None:
+            if ped is not None and (self.export_A or self.export_Ainv):
                 with open('genrenf90.par', 'w') as f:
                     f.writelines(self.file_lines)
                 os.system('renumf90 genrenf90.par')
                 self.dummy_lines.extend(['SNP_FILE\n', 'dummy_snps.txt\n', 'OPTION no_quality_control\n',
-                                         'OPTION saveAscii\n', 'OPTION saveA22Inverse\n', 'OPTION saveA22\n'])
+                                         'OPTION saveAscii\n'])
+                if self.export_A:
+                    self.dummy_lines.append('OPTION saveA22\n')
+                if self.export_Ainv:
+                    self.dummy_lines.append('OPTION saveA22Inverse\n')
                 self.__add_animal_codes__()
                 self.__add_dummy_snps__()
                 with open('genrenf90.par', 'w') as f:
@@ -226,15 +239,17 @@ class Renum:
                     switch_to_no_inbreeding()
                 os.system('preGSf90 renf90.par')
 
-                self.__save_A__()
-                self.__save_Ainv__()
+                if self.export_A:
+                    self.__save_A__()
+                if self.export_Ainv:
+                    self.__save_Ainv__()
 
             # Finally, we add actual genomic data in the renumf90 files if data is available and then we run the final
             # iteration of renumf90.
             self.__add_genomic__()
             with open('genrenf90.par', 'w') as f:
                 f.writelines(self.file_lines)
-            if self.genomic_data is None:
+            if self.genomic_data is None or (not self.export_genomic):
                 os.system('renumf90 genrenf90.par')
                 if not inbreeding:
                     switch_to_no_inbreeding()
@@ -587,26 +602,40 @@ class Renum:
         :return: None
         """
         if self.genomic_data is not None:
-            self.file_lines.append('OPTION saveAscii\n')
+            if self.export_genomic:
+                self.file_lines.append('OPTION saveAscii\n')
             if self.ped is not None:
-                self.file_lines.extend(['OPTION saveHinv\n', 'OPTION saveA22\n', 'OPTION saveA22Inverse\n'])
-            self.file_lines.extend(['OPTION saveG\n', 'OPTION saveGInverse\n', 'OPTION thrStopCorAG 0.0\n',
-                                    'OPTION no_quality_control\n'])
+                if self.export_Hinv:
+                    self.file_lines.append('OPTION saveHinv\n')
+                if self.export_A22:
+                    self.file_lines.append('OPTION saveA22\n')
+                if self.export_A22inv:
+                    self.file_lines.append('OPTION saveA22Inverse\n')
+            if self.export_G:
+                self.file_lines.append('OPTION saveG\n')
+            if self.export_Ginv:
+                self.file_lines.append('OPTION saveGInverse\n')
+            self.file_lines.extend(['OPTION thrStopCorAG 0.0\n', 'OPTION no_quality_control\n'])
             if self.ped is None:
                 self.file_lines.extend(['OPTION AlphaBeta 0.99 0.01\n', 'OPTION tunedG 0\n'])
-            with open('genrenf90.par', 'w') as f:
-                f.writelines(self.file_lines)
-            os.system('renumf90 genrenf90.par')
-            if not self.inbreeding:
-                switch_to_no_inbreeding()
-            os.system('preGSf90 renf90.par')
-            if self.ped is not None:
-                self.__save_A22__()
-                self.__save_A22inv__()
-            self.__save_G__()
-            self.__save_Ginv__()
-            if self.ped is not None:
-                self.__save_Hinv__()
+            if self.export_genomic:
+                with open('genrenf90.par', 'w') as f:
+                    f.writelines(self.file_lines)
+                os.system('renumf90 genrenf90.par')
+                if not self.inbreeding:
+                    switch_to_no_inbreeding()
+                os.system('preGSf90 renf90.par')
+                if self.ped is not None:
+                    if self.export_A22:
+                        self.__save_A22__()
+                    if self.export_A22inv:
+                        self.__save_A22inv__()
+                if self.export_G:
+                    self.__save_G__()
+                if self.export_Ginv:
+                    self.__save_Ginv__()
+                if self.ped is not None and self.export_Hinv:
+                    self.__save_Hinv__()
 
     def __write_snps_to_file__(self):
         """
