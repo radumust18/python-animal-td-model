@@ -3,9 +3,9 @@ from setuptools import setup
 setup(
     name='am_tdm',
     version='0.1.0',
-    description='Python wrappers for the Animal Model and the Test-Day Model using the BLUPF90 suite of programs.'
-                'Supports pedigree renumbering and variance components estimation using REML and Gibbs sampling.'
-                'Information such as EBVs, permanent environmental effects, reliabilities, heritabilities of traits or'
+    description='Python wrappers for the Animal Model and the Test-Day Model using the BLUPF90 suite of programs. '
+                'Supports pedigree renumbering and variance components estimation using REML and Gibbs sampling. '
+                'Information such as EBVs, permanent environmental effects, reliabilities, heritabilities of traits or '
                 'deregressed proofs are computed',
     url='https://github.com/radumust18/python-animal-td-model',
     author='Radu-Ioan Mustatea',
