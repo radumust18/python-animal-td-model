@@ -17,12 +17,29 @@ def add_sol_se():
         f.write('OPTION sol se\n')
 
 
+def remove_postgsf90_incompatible_options():
+    """
+    Some of the options used for the BLUPF90 analysis are incompatible with POSTGSF90. As such, those lines are removed
+    so that POSTGSF90 can be used to estimate SNP effects and/or SNP p-values. Incompatible lines are related to
+    accuracy estimates, pev-pec estimates, as well as standard errors estimates
+    :return: None
+    """
+    with open('renf90.par') as f:
+        lines = f.readlines()
+
+    incompatible_options = ['OPTION sol se', 'OPTION store accuracy', 'OPTION store pev_pec']
+
+    filtered_lines = list(filter(lambda x: not [y for y in incompatible_options if y in x], lines))
+    with open('renf90.par', 'w') as f:
+        f.writelines(filtered_lines)
+
+
 class AnimalModel:
     def __init__(self, data, animal_col, fixed_effects, trait_cols, ped=None, inbreeding=False, genomic_data=None,
-                 ag_variance=None, res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10,
-                 reml_maxrounds=None, reml_conv=None, rounds=10000, burn_in=1000, sampling=10,
-                 use_blupf90_modules=True, export_A=False, export_Ainv=False, export_G=False, export_Ginv=False,
-                 export_Hinv=False, export_A22=False, export_A22inv=False):
+                 snp_effects=False, snp_p_values=False, ag_variance=None, res_variance=None, pe_variance=None,
+                 estimation_method='em-reml', em_steps=10, reml_maxrounds=None, reml_conv=None, rounds=10000,
+                 burn_in=1000, sampling=10, use_blupf90_modules=True, export_A=False, export_Ainv=False, export_G=False,
+                 export_Ginv=False, export_Hinv=False, export_A22=False, export_A22inv=False):
         """
         Class used to implement the Animal Model with multiple traits and multiple fixed effects, as well as with
         repeated records or not (which translates into with or without permanent environmental effects)
@@ -38,6 +55,8 @@ class AnimalModel:
         being the animals' ID, the second one the ID of the sire and the third one the ID of the dam
         :param inbreeding: boolean parameter which tells whether inbreeding should be accounted for or not
         :param genomic_data: dataframe containing animals' genotypic data, if available
+        :param snp_effects: boolean parameter for computing SNP effects
+        :param snp_p_values: boolean parameter for computing SNP p-values
         :param ag_variance: initial additive genetic variance, if it exists
         :param res_variance: initial residual variance, if it exists
         :param pe_variance: initial permanent genetic variance, if it exists
@@ -54,13 +73,6 @@ class AnimalModel:
         :param use_blupf90_modules: whether or not to use BLUPF90 modules
         """
 
-        # Firstly, the pedigree is renumbered and reordered
-        self.renum = Renum(data, animal_col, ped, inbreeding=inbreeding, genomic_data=genomic_data,
-                           use_blupf90_modules=use_blupf90_modules, trait_cols=trait_cols, fixed_effects=fixed_effects,
-                           res_variance=res_variance, ag_variance=ag_variance, pe_variance=pe_variance,
-                           export_A=export_A, export_Ainv=export_Ainv, export_A22=export_A22,
-                           export_A22inv=export_A22inv, export_G=export_G, export_Ginv=export_Ginv,
-                           export_Hinv=export_Hinv)
         self.estimation_method = estimation_method
         self.ag_variance = ag_variance
         self.res_variance = res_variance
@@ -74,6 +86,23 @@ class AnimalModel:
         self.sampling = sampling
         self.fixed_effects = fixed_effects
         self.inbreeding = inbreeding
+        self.genomic_data = genomic_data
+        self.snp_effects = snp_effects
+        self.snp_p_values = snp_p_values
+        if self.genomic_data is not None:
+            self.snp_count = self.genomic_data.shape[1] - 1
+        else:
+            self.snp_count = 0
+        self.__check_genomic_options__()
+
+        # Firstly, the pedigree is renumbered and reordered
+        self.renum = Renum(data, animal_col, ped, inbreeding=inbreeding, genomic_data=genomic_data,
+                           use_blupf90_modules=use_blupf90_modules, trait_cols=trait_cols, fixed_effects=fixed_effects,
+                           res_variance=res_variance, ag_variance=ag_variance, pe_variance=pe_variance,
+                           export_A=export_A, export_Ainv=export_Ainv, export_A22=export_A22,
+                           export_A22inv=export_A22inv, export_G=export_G, export_Ginv=export_Ginv,
+                           export_Hinv=export_Hinv)
+
         self.FE = []
         self.EBVs = np.zeros((len(trait_cols), self.renum.animal_count))
         self.PERMs = np.zeros((len(trait_cols), self.renum.animal_count))
@@ -84,15 +113,24 @@ class AnimalModel:
         self.DRPs = np.zeros((len(trait_cols), self.renum.animal_count))
         self.DRP_RELs = np.zeros((len(trait_cols), self.renum.animal_count))
         self.DRP_weights = np.zeros((len(trait_cols), self.renum.animal_count))
+        self.SNP_effects = np.zeros((len(trait_cols), self.snp_count))
+        self.SNP_p_values = np.zeros((len(trait_cols), self.snp_count))
 
         if use_blupf90_modules:
             self.__estimate_parameters__()
             self.__add_updated_genetic_parameters__()
             add_sol_se()
             self.__add_accuracy__()
+            self.__add_snp_effects__()
             os.system('blupf90+ renf90.par')
             self.__read_blupf90_solutions__()
             self.__read_accuracies__()
+
+            if snp_effects or snp_p_values:
+                remove_postgsf90_incompatible_options()
+                os.system('postGSf90 renf90.par')
+                self.__read_SNP_effects__()
+                self.__read_SNP_p_values__()
 
         self.__compute_heritabilities__()
         for i in range(len(trait_cols)):
@@ -245,6 +283,15 @@ class AnimalModel:
             if not self.inbreeding:
                 f.write('OPTION correct_accuracy_by_inbreeding_direct 0\n')
 
+    def __add_snp_effects__(self):
+        """
+        Checks if p-values should be added and if so, writes the required line in the renf90.par file
+        :return: None
+        """
+        if self.snp_p_values:
+            with open('renf90.par', 'a') as f:
+                f.write('OPTION snp_p_value\n')
+
     def __read_accuracies__(self):
         """
         Reads the reliabilities from the acc_bf90 file generated by blupf90. The reliability is the last value of a line
@@ -316,3 +363,46 @@ class AnimalModel:
         self.DRPs[trait_idx, :] = np.where(wi > 0.0, DRP, 0.0)
         self.DRP_RELs[trait_idx, :] = np.where(wi > 0.0, r2i, 0.0)
         self.DRP_weights[trait_idx, :] = np.where(wi > 0.0, wi, 0.0)
+
+    def __check_genomic_options__(self):
+        """
+        Checks that none of the snp_effects or snp_p_values options are True when having no genomic data
+        :return:
+        """
+        if (self.snp_effects or self.snp_p_values) and self.genomic_data is None:
+            raise ValueError("Can't have any SNP option True if no genomic data is provided")
+
+    def __read_SNP_effects__(self):
+        """
+        Reads the snp_sol file created by postGSf90 and saves the SNP effects
+        :return: None
+        """
+        if self.snp_effects:
+            with open('snp_sol') as f:
+                # Ignore the first header line
+                line = f.readline()
+
+                line = f.readline()
+                while line:
+                    values = line.split()
+                    trait = int(values[0])
+                    snp = int(values[2])
+                    effect = float(values[5])
+                    self.SNP_effects[trait - 1, snp - 1] = effect
+                    line = f.readline()
+
+    def __read_SNP_p_values__(self):
+        """
+        Reads the chrsnp_pval file created by postGSf90 and saves the SNP effects
+        :return: None
+        """
+        if self.snp_p_values:
+            with open('chrsnp_pval') as f:
+                line = f.readline()
+                while line:
+                    values = line.split()
+                    trait = int(values[0])
+                    snp = int(values[3])
+                    neg_log_p_value = float(values[2])
+                    self.SNP_p_values[trait - 1, snp - 1] = 10 ** -neg_log_p_value
+                    line = f.readline()

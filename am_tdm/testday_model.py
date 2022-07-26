@@ -7,13 +7,30 @@ from am_tdm.reml import REML
 from am_tdm.renum import Renum
 
 
+def remove_postgsf90_incompatible_options():
+    """
+    Some of the options used for the BLUPF90 analysis are incompatible with POSTGSF90. As such, those lines are removed
+    so that POSTGSF90 can be used to estimate SNP effects and/or SNP p-values. Incompatible lines are related to
+    accuracy estimates, pev-pec estimates, as well as standard errors estimates
+    :return: None
+    """
+    with open('renf90.par') as f:
+        lines = f.readlines()
+
+    incompatible_options = ['OPTION sol se', 'OPTION store accuracy', 'OPTION store pev_pec']
+
+    filtered_lines = list(filter(lambda x: not [y for y in incompatible_options if y in x], lines))
+    with open('renf90.par', 'w') as f:
+        f.writelines(filtered_lines)
+
+
 class TestDayModel:
     def __init__(self, data, animal_col, lactation_col, dim_col, fixed_effects, trait_cols, ped=None, inbreeding=False,
-                 dim_range=(5, 310), fixed_degree=4, random_degree=2, genomic_data=None, ag_variance=None,
-                 res_variance=None, pe_variance=None, estimation_method='em-reml', em_steps=10, reml_maxrounds=None,
-                 reml_conv=None, rounds=10000, burn_in=1000, sampling=10, use_blupf90_modules=True, export_A=False,
-                 export_Ainv=False, export_G=False, export_Ginv=False, export_Hinv=False, export_A22=False,
-                 export_A22inv=False):
+                 dim_range=(5, 310), fixed_degree=4, random_degree=2, genomic_data=None, snp_effects=False,
+                 snp_p_values=False, ag_variance=None, res_variance=None, pe_variance=None, estimation_method='em-reml',
+                 em_steps=10, reml_maxrounds=None, reml_conv=None, rounds=10000, burn_in=1000, sampling=10,
+                 use_blupf90_modules=True, export_A=False, export_Ainv=False, export_G=False, export_Ginv=False,
+                 export_Hinv=False, export_A22=False, export_A22inv=False):
         """
         Class used to implement the Test-Day Model with multiple traits and multiple fixed effects and variable DIM
         range
@@ -36,6 +53,8 @@ class TestDayModel:
         :param fixed_degree: used for test day model, represents the degree of the fixed Legendre polynomial
         :param random_degree: used for test day model, represents the degree of the random Legendre polynomial
         :param genomic_data: dataframe containing animals' genotypic data, if available
+        :param snp_effects: boolean parameter for computing SNP effects
+        :param snp_p_values: boolean parameter for computing SNP p-values
         :param ag_variance: initial additive genetic variance, if it exists
         :param res_variance: initial residual variance, if it exists
         :param pe_variance: initial permanent genetic variance, if it exists
@@ -52,14 +71,6 @@ class TestDayModel:
         :param use_blupf90_modules: whether or not to use BLUPF90 modules
         """
 
-        # Firstly, the pedigree is renumbered and reordered
-        self.renum = Renum(data, animal_col, ped, inbreeding=inbreeding, genomic_data=genomic_data,
-                           use_blupf90_modules=use_blupf90_modules, trait_cols=trait_cols, fixed_effects=fixed_effects,
-                           res_variance=res_variance, ag_variance=ag_variance, pe_variance=pe_variance,
-                           lactation_col=lactation_col, dim_col=dim_col, dim_range=dim_range, fixed_degree=fixed_degree,
-                           random_degree=random_degree, export_A=export_A, export_Ainv=export_Ainv,
-                           export_A22=export_A22, export_A22inv=export_A22inv, export_G=export_G,
-                           export_Ginv=export_Ginv, export_Hinv=export_Hinv)
         self.estimation_method = estimation_method
         self.ag_variance = ag_variance
         self.res_variance = res_variance
@@ -80,6 +91,21 @@ class TestDayModel:
         self.R = None
         self.fixed_effects = fixed_effects
         self.number_of_traits = len(trait_cols)
+        self.genomic_data = genomic_data
+        self.snp_effects = snp_effects
+        self.snp_p_values = snp_p_values
+
+        self.__check_genomic_options__()
+
+        # Firstly, the pedigree is renumbered and reordered
+        self.renum = Renum(data, animal_col, ped, inbreeding=inbreeding, genomic_data=genomic_data,
+                           use_blupf90_modules=use_blupf90_modules, trait_cols=trait_cols, fixed_effects=fixed_effects,
+                           res_variance=res_variance, ag_variance=ag_variance, pe_variance=pe_variance,
+                           lactation_col=lactation_col, dim_col=dim_col, dim_range=dim_range, fixed_degree=fixed_degree,
+                           random_degree=random_degree, export_A=export_A, export_Ainv=export_Ainv,
+                           export_A22=export_A22, export_A22inv=export_A22inv, export_G=export_G,
+                           export_Ginv=export_Ginv, export_Hinv=export_Hinv)
+
         self.FE = []
         self.fixed_curve_coefficients = np.zeros((self.renum.lactation_dim, self.number_of_traits,
                                                   self.fixed_degree + 1))
@@ -117,13 +143,19 @@ class TestDayModel:
         self.DRP_RELs = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count))
         self.DRP_weights = np.zeros((self.renum.lactation_dim, self.number_of_traits, self.renum.animal_count))
 
-        if use_blupf90_modules:
-            self.__estimate_parameters__()
-            self.__add_updated_genetic_parameters__()
-            self.__add_pev_pec__()
-            os.system('blupf90 renf90.par')
-            self.__read_blupf90_solutions__()
-            self.__read_pev_pec__()
+        if genomic_data is not None:
+            self.snp_count = genomic_data.shape[1] - 1
+        else:
+            self.snp_count = 0
+        self.genomic_data = genomic_data
+        self.SNP_effects_coefficients = np.zeros((self.renum.lactation_dim, self.number_of_traits,
+                                                  self.random_degree, self.snp_count))
+        self.SNP_p_values_coefficients = np.zeros((self.renum.lactation_dim, self.number_of_traits,
+                                                   self.random_degree, self.snp_count))
+        self.SNP_effects = np.zeros((self.renum.lactation_dim, self.number_of_traits, dim_range[1] - dim_range[0] + 1,
+                                     self.snp_count))
+        self.SNP_p_values = np.zeros((self.renum.lactation_dim, self.number_of_traits, dim_range[1] - dim_range[0] + 1,
+                                      self.snp_count))
 
         self.scaled_dim_range = np.arange(dim_range[0], dim_range[1] + 1)
         self.scaled_dim_range = -1 + 2 * (self.scaled_dim_range - dim_range[0]) / (dim_range[1] - dim_range[0])
@@ -132,6 +164,27 @@ class TestDayModel:
         self.legendre_random_coefficients = self.legendre_coefficients[:, range(random_degree + 1)]
         self.legendre_partial_sums = np.cumsum(self.legendre_coefficients, axis=0)
         self.legendre_random_sums = self.legendre_partial_sums[:, range(random_degree + 1)]
+
+        if use_blupf90_modules:
+            self.__estimate_parameters__()
+            self.__add_updated_genetic_parameters__()
+            self.__add_pev_pec__()
+            self.__add_snp_effects__()
+            os.system('blupf90 renf90.par')
+            self.__read_blupf90_solutions__()
+            self.__read_pev_pec__()
+
+            if snp_effects or snp_p_values:
+                remove_postgsf90_incompatible_options()
+                os.system('postGSf90 renf90.par')
+                self.__read_SNP_effects__()
+                self.__read_SNP_p_values__()
+
+                if snp_effects:
+                    self.__compute_SNP_effects__()
+                if snp_p_values:
+                    self.__compute_SNP_p_values__()
+
         self.__compute_fixed_curve_values__()
         self.__compute_random_curves_values__()
         self.__compute_variances_and_heritabilities__()
@@ -427,3 +480,86 @@ class TestDayModel:
         """
         with open('renf90.par', 'a') as f:
             f.write('OPTION store_pev_pec ' + str(len(self.fixed_effects) + self.fixed_degree + 2) + '\n')
+
+    def __check_genomic_options__(self):
+        """
+        Checks that none of the snp_effects or snp_p_values options are True when having no genomic data
+        :return:
+        """
+        if (self.snp_effects or self.snp_p_values) and self.genomic_data is None:
+            raise ValueError("Can't have any SNP option True if no genomic data is provided")
+
+    def __read_SNP_effects__(self):
+        """
+        Reads the snp_sol file created by postGSf90 and saves the SNP effects
+        :return: None
+        """
+        if self.snp_effects:
+            with open('snp_sol') as f:
+                # Ignore the first header line
+                line = f.readline()
+
+                line = f.readline()
+                while line:
+                    values = line.split()
+                    count = int(values[0])
+                    lactation = (count - 1) // self.number_of_traits
+                    trait = (count - 1) % self.number_of_traits
+                    coef = int(values[1])
+                    snp = int(values[2])
+                    effect = float(values[5])
+                    self.SNP_effects_coefficients[lactation, trait, snp - 1,
+                                                  coef - len(self.fixed_effects) - self.fixed_degree - 2] = effect
+                    line = f.readline()
+
+    def __read_SNP_p_values__(self):
+        """
+        Reads the chrsnp_pval file created by postGSf90 and saves the SNP effects
+        :return: None
+        """
+        if self.snp_p_values:
+            with open('chrsnp_pval') as f:
+                line = f.readline()
+                while line:
+                    values = line.split()
+                    count = int(values[0])
+                    lactation = (count - 1) // self.number_of_traits
+                    trait = (count - 1) % self.number_of_traits
+                    coef = int(values[1])
+                    snp = int(values[3])
+                    effect = float(values[2])
+                    self.SNP_p_values_coefficients[lactation, trait, snp - 1, coef - len(self.fixed_effects)
+                                                   - self.fixed_degree - 2] = 10 ** -effect
+                    line = f.readline()
+
+    def __add_snp_effects__(self):
+        """
+        Checks if p-values should be added and if so, writes the required line in the renf90.par file
+        :return: None
+        """
+        if self.snp_p_values:
+            with open('renf90.par', 'a') as f:
+                f.write('OPTION snp_p_value\n')
+
+
+    def __compute_SNP_effects__(self):
+        """
+        Computes SNP effects based on SNP coefficients across all lactations, traits and DIM
+        :return: None
+        """
+        for i in range(self.renum.lactation_dim):
+            for j in range(self.number_of_traits):
+                for k in range(self.renum.animal_count):
+                    self.SNP_effects = self.legendre_partial_sums[:, range(self.random_degree + 1)]\
+                                       @ self.SNP_effects_coefficients
+
+    def __compute_SNP_p_values__(self):
+        """
+        Computes SNP effects based on SNP coefficients across all lactations, traits and DIM
+        :return: None
+        """
+        for i in range(self.renum.lactation_dim):
+            for j in range(self.number_of_traits):
+                for k in range(self.renum.animal_count):
+                    self.SNP_p_values = self.legendre_partial_sums[:, range(self.random_degree + 1)]\
+                                        @ self.SNP_p_values_coefficients
