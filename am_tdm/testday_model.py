@@ -508,8 +508,8 @@ class TestDayModel:
                     coef = int(values[1])
                     snp = int(values[2])
                     effect = float(values[5])
-                    self.SNP_effects_coefficients[lactation, trait, snp - 1,
-                                                  coef - len(self.fixed_effects) - self.fixed_degree - 2] = effect
+                    self.SNP_effects_coefficients[lactation, trait, coef - len(self.fixed_effects)
+                                                  - self.fixed_degree - 2, snp - 1] = effect
                     line = f.readline()
 
     def __read_SNP_p_values__(self):
@@ -528,8 +528,8 @@ class TestDayModel:
                     coef = int(values[1])
                     snp = int(values[3])
                     effect = float(values[2])
-                    self.SNP_p_values_coefficients[lactation, trait, snp - 1, coef - len(self.fixed_effects)
-                                                   - self.fixed_degree - 2] = 10 ** -effect
+                    self.SNP_p_values_coefficients[lactation, trait, coef - len(self.fixed_effects)
+                                                   - self.fixed_degree - 2, snp - 1] = 10 ** -effect
                     line = f.readline()
 
     def __add_snp_effects__(self):
