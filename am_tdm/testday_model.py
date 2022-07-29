@@ -149,9 +149,9 @@ class TestDayModel:
             self.snp_count = 0
         self.genomic_data = genomic_data
         self.SNP_effects_coefficients = np.zeros((self.renum.lactation_dim, self.number_of_traits,
-                                                  self.random_degree, self.snp_count))
+                                                  self.random_degree + 1, self.snp_count))
         self.SNP_p_values_coefficients = np.zeros((self.renum.lactation_dim, self.number_of_traits,
-                                                   self.random_degree, self.snp_count))
+                                                   self.random_degree + 1, self.snp_count))
         self.SNP_effects = np.zeros((self.renum.lactation_dim, self.number_of_traits, dim_range[1] - dim_range[0] + 1,
                                      self.snp_count))
         self.SNP_p_values = np.zeros((self.renum.lactation_dim, self.number_of_traits, dim_range[1] - dim_range[0] + 1,
