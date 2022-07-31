@@ -1,5 +1,5 @@
 import os
-import shutil
+
 import numpy as np
 
 from am_tdm.gibbs import Gibbs
@@ -24,13 +24,13 @@ def remove_postgsf90_incompatible_options():
     estimates, pev-pec estimates, as well as standard errors estimates
     :return: None
     """
-    with open('renf90_gwas.par') as f:
+    with open('renf90.par') as f:
         lines = f.readlines()
 
     incompatible_options = ['OPTION sol se', 'OPTION store accuracy', 'OPTION store_pev_pec']
 
     filtered_lines = list(filter(lambda x: not [y for y in incompatible_options if y in x], lines))
-    with open('renf90_gwas.par', 'w') as f:
+    with open('renf90.par', 'w') as f:
         f.writelines(filtered_lines)
 
 
@@ -49,30 +49,12 @@ def create_new_dir():
     return 'analysis_' + str(i)
 
 
-def replace_weights():
-    """
-    When running GWAS with multiple iterations, the function replaces the weights file with the new weights computed at
-    the last GWAS step
-    :return: None
-    """
-    with open('snp_sol') as f:
-        # Ignore the first header line
-        line = f.readline()
-
-        fw = open('w', 'w')
-        line = f.readline()
-        while line:
-            fw.write(line.split()[6] + '\n')
-            line = f.readline()
-        fw.close()
-
-
 class AnimalModel:
     def __init__(self, data, animal_col, fixed_effects, trait_cols, ped=None, inbreeding=False, genomic_data=None,
-                 snp_effects=False, snp_p_values=False, gwas_iter=1, ag_variance=None, res_variance=None,
-                 pe_variance=None, estimation_method='em-reml', em_steps=10, reml_maxrounds=None, reml_conv=None,
-                 rounds=10000, burn_in=1000, sampling=10, use_blupf90_modules=True, export_A=False, export_Ainv=False,
-                 export_G=False, export_Ginv=False, export_Hinv=False, export_A22=False, export_A22inv=False):
+                 snp_effects=False, snp_p_values=False, ag_variance=None, res_variance=None, pe_variance=None,
+                 estimation_method='em-reml', em_steps=10, reml_maxrounds=None, reml_conv=None, rounds=10000,
+                 burn_in=1000, sampling=10, use_blupf90_modules=True, export_A=False, export_Ainv=False, export_G=False,
+                 export_Ginv=False, export_Hinv=False, export_A22=False, export_A22inv=False):
         """
         Class used to implement the Animal Model with multiple traits and multiple fixed effects, as well as with
         repeated records or not (which translates into with or without permanent environmental effects)
@@ -90,7 +72,6 @@ class AnimalModel:
         :param genomic_data: dataframe containing animals' genotypic data, if available
         :param snp_effects: boolean parameter for computing SNP effects
         :param snp_p_values: boolean parameter for computing SNP p-values
-        :param gwas_iter: number of iterations for GWAS
         :param ag_variance: initial additive genetic variance, if it exists
         :param res_variance: initial residual variance, if it exists
         :param pe_variance: initial permanent genetic variance, if it exists
@@ -130,8 +111,6 @@ class AnimalModel:
             self.snp_count = self.genomic_data.shape[1] - 1
         else:
             self.snp_count = 0
-
-        self.gwas_iter = gwas_iter
         self.__check_genomic_options__()
 
         # Firstly, the pedigree is renumbered and reordered
@@ -161,31 +140,13 @@ class AnimalModel:
             add_sol_se()
             self.__add_accuracy__()
             self.__add_snp_effects__()
-            if snp_effects or snp_p_values:
-                shutil.copy('renf90.par', 'renf90_gwas.par')
-                with open('renf90.par', 'a') as f:
-                    f.write('OPTION saveGInverse\n')
-                with open('renf90_gwas.par', 'a') as f:
-                    f.write('OPTION readGInverse\n')
-                remove_postgsf90_incompatible_options()
-                os.system('blupf90+ renf90.par')
-                os.system('postGSf90 renf90_gwas.par')
-                if gwas_iter > 1:
-                    with open('renf90.par', 'a') as f:
-                        f.write('OPTION weightedG w\n')
-                    with open('renf90_gwas.par', 'a') as f:
-                        f.write('OPTION weightedG w\n')
-                    for _ in range(gwas_iter - 1):
-                        replace_weights()
-                        os.system('blupf90+ renf90.par')
-                        os.system('postGSf90 renf90_gwas.par')
-            else:
-                os.system('blupf90+ renf90.par')
-
+            os.system('blupf90+ renf90.par')
             self.__read_blupf90_solutions__()
             self.__read_accuracies__()
 
             if snp_effects or snp_p_values:
+                remove_postgsf90_incompatible_options()
+                os.system('postGSf90 renf90.par')
                 self.__read_SNP_effects__()
                 self.__read_SNP_p_values__()
 
@@ -430,8 +391,6 @@ class AnimalModel:
         """
         if (self.snp_effects or self.snp_p_values) and self.genomic_data is None:
             raise ValueError("Can't have any SNP option True if no genomic data is provided")
-        if type(self.gwas_iter) != int or self.gwas_iter < 1:
-            raise ValueError("gwas_iter should be a positive integer")
 
     def __read_SNP_effects__(self):
         """
