@@ -107,7 +107,12 @@ class TestDayModel:
         self.G = None
         self.P = None
         self.R = None
-        self.fixed_effects = fixed_effects
+
+        if fixed_effects is None:
+            self.fixed_effects = []
+        else:
+            self.fixed_effects = fixed_effects
+
         self.number_of_traits = len(trait_cols)
         self.genomic_data = genomic_data
         self.snp_effects = snp_effects

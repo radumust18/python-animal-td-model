@@ -102,7 +102,12 @@ class AnimalModel:
         self.rounds = rounds
         self.burn_in = burn_in
         self.sampling = sampling
-        self.fixed_effects = fixed_effects
+
+        if fixed_effects is None:
+            self.fixed_effects = []
+        else:
+            self.fixed_effects = fixed_effects
+
         self.inbreeding = inbreeding
         self.genomic_data = genomic_data
         self.snp_effects = snp_effects
