@@ -1,4 +1,6 @@
 import os
+import resource
+
 import numpy as np
 from scipy.special import legendre
 
@@ -120,6 +122,8 @@ class TestDayModel:
         self.snp_p_values = snp_p_values
 
         self.__check_genomic_options__()
+
+        resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
 
         # Firstly, the pedigree is renumbered and reordered
         self.renum = Renum(data, animal_col, ped, inbreeding=inbreeding, genomic_data=genomic_data,

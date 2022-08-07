@@ -1,4 +1,5 @@
 import os
+import resource
 
 import numpy as np
 
@@ -118,6 +119,8 @@ class AnimalModel:
         else:
             self.snp_count = 0
         self.__check_genomic_options__()
+
+        resource.setrlimit(resource.RLIMIT_STACK, (resource.RLIM_INFINITY, resource.RLIM_INFINITY))
 
         # Firstly, the pedigree is renumbered and reordered
         self.renum = Renum(data, animal_col, ped, inbreeding=inbreeding, genomic_data=genomic_data,
