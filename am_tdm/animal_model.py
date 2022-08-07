@@ -27,7 +27,8 @@ def remove_postgsf90_incompatible_options():
     with open('renf90.par') as f:
         lines = f.readlines()
 
-    incompatible_options = ['OPTION sol se', 'OPTION store_accuracy', 'OPTION store_pev_pec']
+    incompatible_options = ['OPTION sol se', 'OPTION store_accuracy', 'OPTION store_pev_pec',
+                            'OPTION correct_accuracy_by_inbreeding_direct']
 
     filtered_lines = list(filter(lambda x: not [y for y in incompatible_options if y in x], lines))
     with open('renf90.par', 'w') as f:
